@@ -33,8 +33,10 @@ WORKDIR /home/app
 COPY --chown=app:app requirements.txt ./
 
 # Install from the curated PyPI remote. --index-url overrides pypi.org so the
-# request cannot escape Curation.
-RUN pip install --no-cache-dir \
+# request cannot escape Curation. Credentials are injected at build time via a
+# BuildKit secret mounted as /root/.netrc — they never land in an image layer.
+RUN --mount=type=secret,id=netrc,target=/root/.netrc,mode=0600 \
+    pip install --no-cache-dir \
       --index-url "${JF_PYPI_INDEX_URL}" \
       -r requirements.txt
 

@@ -149,7 +149,24 @@ jobs:
       - name: Build image (curated base + curated wheels)
         working-directory: app
         run: |
-          docker build \
+          # `jf docker login` writes base64-encoded credentials to ~/.docker/config.json.
+          # Decode them into a .netrc file so pip inside the Dockerfile can authenticate
+          # without the credentials ever landing in an image layer (BuildKit secret mount).
+          DOCKER_AUTH="$(jq -r --arg r "${JF_DOCKER_REGISTRY}" \
+            '.auths[$r].auth // empty' ~/.docker/config.json 2>/dev/null || true)"
+          if [ -z "${DOCKER_AUTH}" ]; then
+            echo "::error::No Docker credentials found for ${JF_DOCKER_REGISTRY} — did jf docker login run?" >&2
+            exit 1
+          fi
+          JF_USER="$(printf '%s' "${DOCKER_AUTH}" | base64 -d | cut -d: -f1)"
+          JF_PASS="$(printf '%s' "${DOCKER_AUTH}" | base64 -d | cut -d: -f2-)"
+          printf 'machine %s\nlogin %s\npassword %s\n' \
+            "${JF_DOCKER_REGISTRY}" "${JF_USER}" "${JF_PASS}" \
+            > "$RUNNER_TEMP/pip-netrc"
+          chmod 600 "$RUNNER_TEMP/pip-netrc"
+
+          DOCKER_BUILDKIT=1 docker build \
+            --secret id=netrc,src="$RUNNER_TEMP/pip-netrc" \
             --build-arg JF_DOCKER_REGISTRY="${JF_DOCKER_REGISTRY}" \
             --build-arg JF_DOCKER_REMOTE="${DOCKER_REMOTE}" \
             --build-arg JF_PYPI_INDEX_URL="https://${JF_DOCKER_REGISTRY}/artifactory/api/pypi/${PYPI_REMOTE}/simple" \
