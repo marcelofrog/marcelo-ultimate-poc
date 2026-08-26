@@ -2,7 +2,7 @@
 # All of these packages have had at least one publicly reported supply-chain
 # or account-compromise incident in the last few years — perfect showcase
 # material for the malicious/immature/no-license blocking policies.
-fastapi==0.135.0
+fastapi==0.139.1
 uvicorn[standard]==0.32.1
 pydantic==2.10.3
 requests==2.32.3
