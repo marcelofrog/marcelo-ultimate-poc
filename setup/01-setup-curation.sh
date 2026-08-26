@@ -113,18 +113,30 @@ apply_policy "$(policy_id curation-no-license)" "$(cat <<JSON
 JSON
 )"
 
-# Immature < 7 days — custom condition using the isImmature template
+# Immature < 7 days — custom condition using the isImmature template.
+# CLI-gap: the policy API does not accept inline condition objects; a condition
+# must be created separately to obtain its numeric id, which is then referenced
+# via condition_id in the policy body.
+immature_cond_name="$(policy_id immature-7d)"
+IMMATURE_COND_ID="$(curation_condition_id_by_name "$immature_cond_name")"
+if [[ -z "$IMMATURE_COND_ID" ]]; then
+  immature_resp="$(jf api /xray/api/v1/curation/conditions -X POST \
+    -H "Content-Type: application/json" \
+    --data "{\"name\":\"${immature_cond_name}\",\"condition_template_id\":\"isImmature\",\"risk_type\":\"operational\",\"param_values\":[{\"param_id\":\"package_age_days\",\"value\":7}]}" \
+    2>/dev/null)"
+  IMMATURE_COND_ID="$(echo "$immature_resp" | jq -r '.id // empty')"
+  [[ -n "$IMMATURE_COND_ID" ]] || die "failed to create immature curation condition — response: $immature_resp"
+  ok "created curation condition: ${immature_cond_name} (id=${IMMATURE_COND_ID})"
+else
+  ok "curation condition already exists: ${immature_cond_name} (id=${IMMATURE_COND_ID})"
+fi
+
 apply_policy "$(policy_id curation-immature)" "$(cat <<JSON
 {
   "name":                 "$(policy_id curation-immature)",
   "scope":                "specific_repos",
   "policy_action":        "block",
-  "condition": {
-    "name":                   "$(policy_id immature-7d)",
-    "condition_template_id":  "isImmature",
-    "risk_type":              "operational",
-    "param_values": [{"param_id":"package_age_days","value":7}]
-  },
+  "condition_id":         "${IMMATURE_COND_ID}",
   "repo_include":         ${REPOS},
   "waiver_request_config":"forbidden",
   "block_from_cache":     true,

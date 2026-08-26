@@ -101,7 +101,15 @@ _del_user()       { jf rt curl -sS -X DELETE "api/security/users/$1" >/dev/null;
 _del_group()      { jf rt curl -sS -X DELETE "api/security/groups/$1" >/dev/null; }
 _del_perm()       { jf rt curl -sS -X DELETE "api/v2/security/permissions/$1" >/dev/null; }
 _del_oidc()       { rt_api DELETE "/access/api/v1/oidc/$1" >/dev/null; }
-_del_curation()   { jf curation policy-delete --id "$1" --quiet; }
+_del_curation()   {
+  # CLI-gap: jf curation does not exist; delete via REST by resolving name→numeric id.
+  local name="$1"
+  local policy_id
+  policy_id="$(jf api "/xray/api/v1/curation/policies?num_of_rows=1000" -X GET 2>/dev/null \
+    | jq -r --arg n "$name" '.data[] | select(.name == $n) | .id' | head -1)"
+  [[ -n "$policy_id" ]] || return 1
+  jf api "/xray/api/v1/curation/policies/${policy_id}" -X DELETE 2>/dev/null
+}
 _del_gate()       { rt_api DELETE "/apptrust/api/v1/applications/${APP}/gates/$1" >/dev/null; }
 _del_apptrust()   { rt_api DELETE "/apptrust/api/v1/applications/$1" >/dev/null; }
 _del_evd_key()    { rt_api DELETE "/evidence/api/v1/keys/$1" >/dev/null; }
@@ -168,6 +176,24 @@ for p in "$(policy_id curation-malicious)" \
          "$(policy_id curation-immature)"; do
   do_delete "curation policy" "$p" curation_policy_exists _del_curation "$p"
 done
+
+# ---------- 6b. Curation condition -------------------------------------------
+log "Removing custom curation condition"
+_immature_cond_name="$(policy_id immature-7d)"
+_immature_cond_id="$(curation_condition_id_by_name "$_immature_cond_name" 2>/dev/null || true)"
+if [[ -z "$_immature_cond_id" ]]; then
+  printf "  %-18s  %-45s  ${C_YELLOW}absent${C_RESET}\n" "curation cond" "$_immature_cond_name"
+  absent=$((absent + 1))
+elif (( DRY_RUN == 1 )); then
+  printf "  %-18s  %-45s  ${C_BLUE}would delete${C_RESET}\n" "curation cond" "$_immature_cond_name"
+  deleted=$((deleted + 1))
+elif jf api "/xray/api/v1/curation/conditions/${_immature_cond_id}" -X DELETE 2>/dev/null; then
+  printf "  %-18s  %-45s  ${C_GREEN}deleted${C_RESET}\n" "curation cond" "$_immature_cond_name"
+  deleted=$((deleted + 1))
+else
+  printf "  %-18s  %-45s  ${C_RED}ERROR${C_RESET}\n" "curation cond" "$_immature_cond_name"
+  errored=$((errored + 1))
+fi
 
 # ---------- 7. Repositories --------------------------------------------------
 # Locals first (they reference remotes indirectly through virtuals/pipelines),

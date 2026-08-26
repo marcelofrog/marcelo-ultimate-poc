@@ -30,6 +30,7 @@ create_local_docker() {
     ok "local docker repo already exists: $key"
     return
   fi
+  local stage_upper; stage_upper="$(echo "$stage" | tr '[:lower:]' '[:upper:]')"
   local tmp; tmp="$(mktemp)"
   cat > "$tmp" <<JSON
 {
@@ -39,7 +40,7 @@ create_local_docker() {
   "dockerApiVersion": "V2",
   "xrayIndex": true,
   "description": "POC ${APP} ${stage}-stage image repo",
-  "environments": ["${stage^^}"]
+  "environments": ["${stage_upper}"]
 }
 JSON
   jf_admin rt repo-create "$tmp"

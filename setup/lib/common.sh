@@ -475,6 +475,16 @@ curation_policy_exists() {
   jf api "/xray/api/v1/curation/policies?num_of_rows=1000" -X GET 2>/dev/null \
     | jq -e --arg n "$name" 'any(.data[]; .name == $n)' >/dev/null 2>&1
 }
+curation_condition_exists() {
+  local name="$1"
+  jf api "/xray/api/v1/curation/conditions?num_of_rows=1000" -X GET 2>/dev/null \
+    | jq -e --arg n "$name" 'any(.data[]; .name == $n)' >/dev/null 2>&1
+}
+curation_condition_id_by_name() {
+  local name="$1"
+  jf api "/xray/api/v1/curation/conditions?num_of_rows=1000" -X GET 2>/dev/null \
+    | jq -r --arg n "$name" '.data[] | select(.name == $n) | .id' | head -1
+}
 evidence_key_exists() {
   [[ "$(api_status_code "/evidence/api/v1/keys/$1")" == "200" ]]
 }
