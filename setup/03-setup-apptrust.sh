@@ -117,58 +117,73 @@ mk_perm "$(perm_target qa   writer)"   "$(repo_stage qa)"   "$(group_stage qa)" 
 mk_perm "$(perm_target prod promoter)" "$(repo_stage qa)"   "$(group_stage prod)" '["read","promote"]'
 mk_perm "$(perm_target prod writer)"   "$(repo_stage prod)" "$(group_stage prod)" '["read","write","annotate"]'
 
-# =========== 4. Promotion gates ==============================================
-log "Creating promotion gates on application ${APP}"
+# =========== 4. Promotion gates (Unified Policy API) =========================
+# CLI-gap: `jf apptrust` has no gate-management subcommand; use the unified
+# policy REST API at /unifiedpolicy/api/v1. Stage keys must be uppercase.
+#
+# Two gates are created on the application lifecycle:
+#   DEV exit  — security: block if applicable CVE score >= CVE_THRESHOLD
+#   QA  exit  — evidence: block if no test-results evidence is attached
+log "Creating promotion gates (unified policy API) for application ${APP}"
 
-# --- 4a. Security gate: block if applicable CVE >= threshold -----------------
-security_gate_id="$(prefix gate-security)"
-tmp="$(mktemp)"
-cat > "$tmp" <<JSON
-{
-  "id": "${security_gate_id}",
-  "name": "Block applicable CVE >= ${CVE_THRESHOLD}",
-  "description": "Fail promotion when Xray contextual analysis reports an APPLICABLE CVE at or above ${CVE_THRESHOLD}.",
-  "type": "security",
-  "enabled": true,
-  "criteria": {
-    "cvss_score_min": ${CVE_THRESHOLD},
-    "applicability": ["applicable"],
-    "action": "block"
-  },
-  "scope": { "application_key": "${APP}" }
-}
-JSON
-# CLI-gap: gate management not yet in `jf apptrust`, use REST.
-rt_api POST "/apptrust/api/v1/applications/${APP}/gates" "$(cat "$tmp")" >/dev/null || \
-  warn "security gate may already exist (${security_gate_id})"
-rm -f "$tmp"
-ok "security gate configured (${security_gate_id})"
+security_rule_name="$(prefix security-rule)"
+evidence_rule_name="$(prefix evidence-rule)"
+dev_exit_policy_name="$(prefix dev-exit-gate)"
+qa_exit_policy_name="$(prefix qa-exit-gate)"
 
-# --- 4b. Rego gate: minimum passing test count -------------------------------
-rego_gate_id="$(prefix gate-tests)"
-rego_body="$(cat "${REPO_ROOT}/policies/test-count.rego" | jq -Rs .)"
-tmp="$(mktemp)"
-cat > "$tmp" <<JSON
-{
-  "id": "${rego_gate_id}",
-  "name": "Require >= ${MIN_TESTS} passing tests",
-  "description": "Require an evidence attestation showing at least ${MIN_TESTS} passing tests before promotion.",
-  "type": "rego",
-  "enabled": true,
-  "parameters": { "min_passing_tests": ${MIN_TESTS} },
-  "policy": ${rego_body},
-  "scope": { "application_key": "${APP}" }
-}
-JSON
-rt_api POST "/apptrust/api/v1/applications/${APP}/gates" "$(cat "$tmp")" >/dev/null || \
-  warn "rego gate may already exist (${rego_gate_id})"
-rm -f "$tmp"
-ok "rego test-count gate configured (${rego_gate_id})"
+# --- 4a. Security rule (template 1005 = CVE CVSS, contextual analysis) -------
+SECURITY_RULE_ID=""
+if unified_rule_exists "$security_rule_name"; then
+  SECURITY_RULE_ID="$(unified_rule_id_by_name "$security_rule_name")"
+  ok "security rule already exists (${security_rule_name}, id=${SECURITY_RULE_ID})"
+else
+  log "creating security rule: block CVE CVSS >= ${CVE_THRESHOLD}"
+  SECURITY_RULE_ID="$(rt_api POST "/unifiedpolicy/api/v1/rules" \
+    "{\"name\":\"${security_rule_name}\",\"description\":\"Block CVE CVSS >= ${CVE_THRESHOLD} (contextual analysis)\",\"template_id\":\"1005\",\"parameters\":[{\"name\":\"min_cvss\",\"value\":\"${CVE_THRESHOLD}\"},{\"name\":\"max_cvss\",\"value\":\"10.0\"}]}" \
+    2>/dev/null | jq -r '.id')"
+  ok "security rule created (${security_rule_name}, id=${SECURITY_RULE_ID})"
+fi
+
+# --- 4b. Evidence existence rule (template 1007 = evidence predicate check) --
+EVIDENCE_RULE_ID=""
+if unified_rule_exists "$evidence_rule_name"; then
+  EVIDENCE_RULE_ID="$(unified_rule_id_by_name "$evidence_rule_name")"
+  ok "evidence rule already exists (${evidence_rule_name}, id=${EVIDENCE_RULE_ID})"
+else
+  log "creating evidence rule: require test-results attestation"
+  EVIDENCE_RULE_ID="$(rt_api POST "/unifiedpolicy/api/v1/rules" \
+    "{\"name\":\"${evidence_rule_name}\",\"description\":\"Require test-results evidence attestation\",\"template_id\":\"1007\",\"parameters\":[{\"name\":\"predicateType\",\"value\":\"https://jfrog.com/evidence/test-results/v1\"}]}" \
+    2>/dev/null | jq -r '.id')"
+  ok "evidence rule created (${evidence_rule_name}, id=${EVIDENCE_RULE_ID})"
+fi
+
+# --- 4c. DEV exit gate policy: security rule ---------------------------------
+if unified_policy_exists "$dev_exit_policy_name"; then
+  ok "DEV exit gate policy already exists (${dev_exit_policy_name})"
+else
+  log "creating DEV exit gate policy (CVE >= ${CVE_THRESHOLD})"
+  rt_api POST "/unifiedpolicy/api/v1/policies" \
+    "{\"name\":\"${dev_exit_policy_name}\",\"description\":\"Block DEV→QA promotion if applicable CVE >= ${CVE_THRESHOLD}\",\"mode\":\"block\",\"enabled\":true,\"rule_ids\":[\"${SECURITY_RULE_ID}\"],\"scope\":{\"type\":\"application\",\"application_keys\":[\"${APP}\"]},\"action\":{\"type\":\"certify_to_gate\",\"stage\":{\"key\":\"DEV\",\"gate\":\"exit\"}}}" \
+    >/dev/null 2>&1
+  ok "DEV exit gate policy created (${dev_exit_policy_name})"
+fi
+
+# --- 4d. QA exit gate policy: evidence rule ----------------------------------
+if unified_policy_exists "$qa_exit_policy_name"; then
+  ok "QA exit gate policy already exists (${qa_exit_policy_name})"
+else
+  log "creating QA exit gate policy (test-results evidence required)"
+  rt_api POST "/unifiedpolicy/api/v1/policies" \
+    "{\"name\":\"${qa_exit_policy_name}\",\"description\":\"Block QA→PROD promotion unless test-results evidence is attached\",\"mode\":\"block\",\"enabled\":true,\"rule_ids\":[\"${EVIDENCE_RULE_ID}\"],\"scope\":{\"type\":\"application\",\"application_keys\":[\"${APP}\"]},\"action\":{\"type\":\"certify_to_gate\",\"stage\":{\"key\":\"QA\",\"gate\":\"exit\"}}}" \
+    >/dev/null 2>&1
+  ok "QA exit gate policy created (${qa_exit_policy_name})"
+fi
 
 ok "AppTrust setup complete."
 echo
 echo "Application key : ${APP}"
-echo "Lifecycle       : dev -> qa -> prod"
+echo "Lifecycle       : DEV → QA → PROD"
 echo "Repositories    : $(repo_stage dev), $(repo_stage qa), $(repo_stage prod)"
+echo "Gates           : ${dev_exit_policy_name} (DEV exit), ${qa_exit_policy_name} (QA exit)"
 echo
 echo "Next: run ./04-setup-oidc.sh <owner/repo>"

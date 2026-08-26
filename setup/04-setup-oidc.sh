@@ -11,7 +11,7 @@
 # -----------------------------------------------------------------------------
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
-preflight jf jq curl
+preflight jf jq curl gh
 load_env
 
 REPO_ARG="${1:-${POC_GITHUB_REPO:-}}"
@@ -76,34 +76,73 @@ create_oidc "$(oidc_int dev)"  "dev"  "$(stage_user dev)"
 create_oidc "$(oidc_int qa)"   "qa"   "$(stage_user qa)"
 create_oidc "$(oidc_int prod)" "prod" "$(stage_user prod)"
 
-# ---------- Print instructions for the GitHub side ----------------------------
+# ---------- GitHub side: environments + variables ----------------------------
+log "Configuring GitHub repo ${OWNER}/${REPO}"
+
+# Look up the caller's GitHub user ID for required-reviewer config on qa/prod.
+REVIEWER_ID="$(gh api user --jq '.id' 2>/dev/null)" \
+  || die "Cannot look up GitHub user ID — check gh auth status"
+ok "GitHub user id: ${REVIEWER_ID}"
+
+# Repo-level variables used by all workflow jobs (not environment-scoped).
+log "Setting repo-level variables"
+gh variable set JF_URL             --repo "${OWNER}/${REPO}" --body "${JF_URL}"
+gh variable set JF_DOCKER_REGISTRY --repo "${OWNER}/${REPO}" --body "${POC_DOCKER_REGISTRY_HOST}"
+gh variable set POC_APP_NAME       --repo "${OWNER}/${REPO}" --body "${APP}"
+ok "repo variables: JF_URL, JF_DOCKER_REGISTRY, POC_APP_NAME"
+
+# create_gh_env <stage> <oidc_provider_name> [require_review=true|false]
+create_gh_env() {
+  local stage="$1" oidc_provider="$2" require_review="${3:-false}"
+  log "GitHub environment: ${stage}"
+
+  # Create or update the environment.  review_policy is only set when needed
+  # so dev doesn't get a spurious empty reviewers array.
+  if [[ "$require_review" == "true" ]]; then
+    gh api "repos/${OWNER}/${REPO}/environments/${stage}" \
+      -X PUT \
+      -H "Accept: application/vnd.github+json" \
+      --field "reviewers[][type]=User" \
+      --field "reviewers[][id]=${REVIEWER_ID}" \
+      >/dev/null
+  else
+    gh api "repos/${OWNER}/${REPO}/environments/${stage}" \
+      -X PUT \
+      -H "Accept: application/vnd.github+json" \
+      >/dev/null
+  fi
+
+  # Set the environment-scoped variable that tells workflows which OIDC
+  # provider to request a token from.
+  gh variable set JF_OIDC_PROVIDER \
+    --repo "${OWNER}/${REPO}" \
+    --env "${stage}" \
+    --body "${oidc_provider}"
+
+  if [[ "$require_review" == "true" ]]; then
+    ok "environment '${stage}': JF_OIDC_PROVIDER=${oidc_provider} (required reviewer: ${REVIEWER_ID})"
+  else
+    ok "environment '${stage}': JF_OIDC_PROVIDER=${oidc_provider}"
+  fi
+}
+
+create_gh_env "dev"  "$(oidc_int dev)"  false
+create_gh_env "qa"   "$(oidc_int qa)"   true
+create_gh_env "prod" "$(oidc_int prod)" true
+
+ok "OIDC setup complete."
+
 cat <<EOF
 
 ────────────────────────────────────────────────────────────────────────────
-Next, on GitHub (${OWNER}/${REPO}):
+GitHub repo ${OWNER}/${REPO} is now configured:
 
-1. Go to Settings > Environments and create three environments:
-
-     dev   qa   prod
-
-   For **qa** and **prod** add "Required reviewers" (yourself) so promotion
-   requires human approval.
-
-2. In each environment, add a single Environment Variable:
-
-     JF_OIDC_PROVIDER = <one of:>
-        dev   -> $(oidc_int dev)
-        qa    -> $(oidc_int qa)
-        prod  -> $(oidc_int prod)
-
-3. As a repo-level *variable* (not a secret) set:
-
-     JF_URL              = ${JF_URL}
-     JF_DOCKER_REGISTRY  = ${POC_DOCKER_REGISTRY_HOST:-<hostname of JFrog>}
-     POC_APP_NAME        = ${APP}
+  Environments created : dev, qa, prod
+  qa + prod            : require reviewer approval before a workflow can
+                         obtain an OIDC token for those stages
+  Repo variables set   : JF_URL, JF_DOCKER_REGISTRY, POC_APP_NAME
+  Env variable per env : JF_OIDC_PROVIDER
 
 You do NOT need to set any GitHub secret — all authentication is OIDC.
 ────────────────────────────────────────────────────────────────────────────
 EOF
-
-ok "OIDC setup complete."

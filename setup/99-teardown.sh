@@ -110,9 +110,18 @@ _del_curation()   {
   [[ -n "$policy_id" ]] || return 1
   jf api "/xray/api/v1/curation/policies/${policy_id}" -X DELETE 2>/dev/null
 }
-_del_gate()       { rt_api DELETE "/apptrust/api/v1/applications/${APP}/gates/$1" >/dev/null; }
 _del_apptrust()   { rt_api DELETE "/apptrust/api/v1/applications/$1" >/dev/null; }
 _del_evd_key()    { rt_api DELETE "/evidence/api/v1/keys/$1" >/dev/null; }
+_del_unified_policy() {
+  local id; id="$(unified_policy_id_by_name "$1" 2>/dev/null || true)"
+  [[ -n "$id" ]] || return 1
+  rt_api DELETE "/unifiedpolicy/api/v1/policies/${id}" >/dev/null
+}
+_del_unified_rule() {
+  local id; id="$(unified_rule_id_by_name "$1" 2>/dev/null || true)"
+  [[ -n "$id" ]] || return 1
+  rt_api DELETE "/unifiedpolicy/api/v1/rules/${id}" >/dev/null
+}
 
 # ---------- 1. Application versions (must go before the app) ----------------
 log "Removing AppTrust application versions"
@@ -143,10 +152,14 @@ else
   absent=$((absent + 1))
 fi
 
-# ---------- 2. AppTrust gates ------------------------------------------------
-log "Removing promotion gates"
-do_delete "apptrust gate" "$(prefix gate-security)" "apptrust_gate_exists $APP" _del_gate "$(prefix gate-security)"
-do_delete "apptrust gate" "$(prefix gate-tests)"    "apptrust_gate_exists $APP" _del_gate "$(prefix gate-tests)"
+# ---------- 2. Unified policy gates (policies then rules) --------------------
+log "Removing promotion gate policies"
+do_delete "policy" "$(prefix dev-exit-gate)" unified_policy_exists _del_unified_policy "$(prefix dev-exit-gate)"
+do_delete "policy" "$(prefix qa-exit-gate)"  unified_policy_exists _del_unified_policy "$(prefix qa-exit-gate)"
+
+log "Removing promotion gate rules"
+do_delete "rule" "$(prefix security-rule)" unified_rule_exists _del_unified_rule "$(prefix security-rule)"
+do_delete "rule" "$(prefix evidence-rule)" unified_rule_exists _del_unified_rule "$(prefix evidence-rule)"
 
 # ---------- 3. AppTrust application ------------------------------------------
 log "Removing AppTrust application"

@@ -64,10 +64,12 @@ CHECKLIST=(
   # JFrog project
   "project|${POC_PROJECT_KEY}|project_exists"
 
-  # AppTrust application + gates
+  # AppTrust application + unified policy gates
   "apptrust app|${APP}|apptrust_application_exists"
-  "apptrust gate|$(prefix gate-security)|apptrust_gate_exists ${APP}"
-  "apptrust gate|$(prefix gate-tests)|apptrust_gate_exists ${APP}"
+  "policy|$(prefix dev-exit-gate)|unified_policy_exists"
+  "policy|$(prefix qa-exit-gate)|unified_policy_exists"
+  "rule|$(prefix security-rule)|unified_rule_exists"
+  "rule|$(prefix evidence-rule)|unified_rule_exists"
 
   # Curation policies
   "curation policy|$(policy_id curation-malicious)|curation_policy_exists"

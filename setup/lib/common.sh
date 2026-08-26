@@ -492,3 +492,23 @@ evidence_key_exists() {
 project_exists() {
   [[ "$(api_status_code "/access/api/v1/projects/$1")" == "200" ]]
 }
+unified_rule_exists() {
+  local name="$1"
+  jf api "/unifiedpolicy/api/v1/rules?limit=1000" -X GET 2>/dev/null \
+    | jq -e --arg n "$name" 'any(.items[]; .name == $n)' >/dev/null 2>&1
+}
+unified_rule_id_by_name() {
+  local name="$1"
+  jf api "/unifiedpolicy/api/v1/rules?limit=1000" -X GET 2>/dev/null \
+    | jq -r --arg n "$name" '.items[] | select(.name == $n) | .id' | head -1
+}
+unified_policy_exists() {
+  local name="$1"
+  jf api "/unifiedpolicy/api/v1/policies?limit=1000" -X GET 2>/dev/null \
+    | jq -e --arg n "$name" 'any(.items[]; .name == $n)' >/dev/null 2>&1
+}
+unified_policy_id_by_name() {
+  local name="$1"
+  jf api "/unifiedpolicy/api/v1/policies?limit=1000" -X GET 2>/dev/null \
+    | jq -r --arg n "$name" '.items[] | select(.name == $n) | .id' | head -1
+}
