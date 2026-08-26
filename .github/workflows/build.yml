@@ -91,7 +91,48 @@ jobs:
         working-directory: app
         run: |
           jf pip-config --repo-resolve "${PYPI_REMOTE}"
-          jf curation-audit --requirements-file=requirements.txt --fail=true
+
+          # --format=json produces a parseable report; there is no --fail flag.
+          # curation-audit exits non-zero when blocked packages are found, but
+          # we also parse the JSON to display exactly which packages were blocked
+          # and under which policy.
+          set +e
+          jf curation-audit \
+            --requirements-file=requirements.txt \
+            --format=json 2>&1 | tee /tmp/curation-audit.json
+          AUDIT_RC=${PIPESTATUS[0]}
+          set -e
+
+          # Blocked packages appear as array items whose "blocked" array is
+          # non-empty, or whose "status" field equals "blocked".
+          BLOCKED=$(jq -r '
+            if type == "array" then
+              [ .[] | select(
+                  (.blocked // [] | length) > 0
+                  or .status == "blocked"
+                ) ] | length
+            elif type == "object" then
+              ((.blockedPackages // []) | length)
+            else 0 end
+          ' /tmp/curation-audit.json 2>/dev/null || echo "0")
+
+          if [ "${BLOCKED:-0}" -gt 0 ]; then
+            echo "::error::Curation policy blocked ${BLOCKED} package(s):"
+            jq -r '
+              if type == "array" then
+                .[] | select((.blocked // [] | length) > 0 or .status == "blocked") |
+                "  BLOCKED \(.name)@\(.version)  policy=\( [.blocked[]?.policyName // empty, .policies[]?.policy // empty] | first // "unknown" )"
+              else . end
+            ' /tmp/curation-audit.json 2>/dev/null || true
+            exit 1
+          fi
+
+          if [ "${AUDIT_RC}" -ne 0 ]; then
+            echo "::error::Curation audit command failed (exit ${AUDIT_RC})"
+            exit "${AUDIT_RC}"
+          fi
+
+          echo "Curation audit passed — no blocked packages."
 
       # ---------- 4. Docker build & push --------------------------------------
       - name: Docker login to JFrog
@@ -133,13 +174,10 @@ jobs:
       # ---------- 5. AppTrust application version -----------------------------
       - name: Create AppTrust application version
         run: |
-          jf apptrust application-version-create \
-            --application "${APP_NAME}" \
-            --version "${{ steps.tag.outputs.app_version }}" \
-            --stage dev \
-            --build-name "${APP_NAME}" \
-            --build-number "${{ github.run_id }}" \
-            --sources "docker://${{ steps.tag.outputs.image }}"
+          # positional args: <app-key> <version>
+          # source is the build info published in the previous step.
+          jf apptrust version-create "${APP_NAME}" "${{ steps.tag.outputs.app_version }}" \
+            --source-type-builds="name=${APP_NAME}, id=${{ github.run_id }}"
 
       # ---------- 6. Tests ----------------------------------------------------
       - name: Set up Python
