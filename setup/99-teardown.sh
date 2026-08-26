@@ -111,7 +111,11 @@ _del_curation()   {
   jf api "/xray/api/v1/curation/policies/${policy_id}" -X DELETE 2>/dev/null
 }
 _del_apptrust()   { rt_api DELETE "/apptrust/api/v1/applications/$1" >/dev/null; }
-_del_evd_key()    { rt_api DELETE "/evidence/api/v1/keys/$1" >/dev/null; }
+_del_evd_key()    {
+  local kid; kid="$(evidence_key_kid_by_alias "$1" 2>/dev/null || true)"
+  [[ -n "$kid" ]] || return 1
+  jf api "/artifactory/api/security/keys/trusted/${kid}" -X DELETE >/dev/null
+}
 _del_unified_policy() {
   local id; id="$(unified_policy_id_by_name "$1" 2>/dev/null || true)"
   [[ -n "$id" ]] || return 1

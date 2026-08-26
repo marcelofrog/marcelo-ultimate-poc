@@ -487,7 +487,14 @@ curation_condition_id_by_name() {
     | jq -r --arg n "$name" '.data[] | select(.name == $n) | .id' | head -1
 }
 evidence_key_exists() {
-  [[ "$(api_status_code "/evidence/api/v1/keys/$1")" == "200" ]]
+  # Keys live at /artifactory/api/security/keys/trusted, NOT /evidence/api/v1/keys.
+  # Match by alias since the kid (short hash) is what the path uses.
+  jf api "/artifactory/api/security/keys/trusted" -X GET 2>/dev/null \
+    | jq -e --arg a "$1" 'any(.keys[]; .alias == $a)' >/dev/null 2>&1
+}
+evidence_key_kid_by_alias() {
+  jf api "/artifactory/api/security/keys/trusted" -X GET 2>/dev/null \
+    | jq -r --arg a "$1" '.keys[] | select(.alias == $a) | .kid' | head -1
 }
 project_exists() {
   [[ "$(api_status_code "/access/api/v1/projects/$1")" == "200" ]]

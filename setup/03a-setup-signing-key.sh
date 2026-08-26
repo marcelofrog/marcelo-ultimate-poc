@@ -33,9 +33,32 @@ chmod 700 "$KEY_DIR"
 
 # ---------- 1. keypair -------------------------------------------------------
 # `jf evd gen-keys` refuses to overwrite existing files, so we must remove
-# any stale material (wrong format, or JFrog alias missing) before regenerating.
+# any stale material before regenerating. Trusted keys live at
+# /artifactory/api/security/keys/trusted (DELETE by kid, POST to add).
+_upload_pub_key() {
+  local pub_pem; pub_pem="$(cat "$PUB_FILE")"
+  # Delete existing alias if present (kid-based).
+  local kid; kid="$(evidence_key_kid_by_alias "$KEY_ALIAS" 2>/dev/null || true)"
+  if [[ -n "$kid" ]]; then
+    jf api "/artifactory/api/security/keys/trusted/${kid}" -X DELETE >/dev/null 2>&1 || true
+  fi
+  jf api "/artifactory/api/security/keys/trusted" -X POST \
+    -H "Content-Type: application/json" \
+    --data "{\"alias\":\"${KEY_ALIAS}\",\"key\":$(echo "$pub_pem" | jq -Rs .)}" >/dev/null
+}
+
 if [[ -f "$PRIV_FILE" ]] && evidence_key_exists "$KEY_ALIAS"; then
-  ok "signing key already present and registered (alias: ${KEY_ALIAS})"
+  # Verify local public key matches what JFrog has stored.
+  local_pub="$(cat "$PUB_FILE" | tr -d '\n')"
+  jfrog_pub="$(jf api "/artifactory/api/security/keys/trusted" -X GET 2>/dev/null \
+    | jq -r --arg a "$KEY_ALIAS" '.keys[] | select(.alias == $a) | .key' | tr -d '\n')"
+  if [[ "$local_pub" == "$jfrog_pub" ]]; then
+    ok "signing key already present and registered (alias: ${KEY_ALIAS})"
+  else
+    warn "local public key differs from JFrog trusted-keys store — re-uploading"
+    _upload_pub_key
+    ok "public key updated in JFrog trusted-keys store (alias: ${KEY_ALIAS})"
+  fi
 else
   if [[ -f "$PRIV_FILE" ]] || [[ -f "$PUB_FILE" ]]; then
     warn "stale key files found (JFrog alias not registered) — removing and regenerating"
@@ -43,13 +66,15 @@ else
     rm -f "${KEY_DIR}/${KEY_ALIAS}.pem" "${KEY_DIR}/${KEY_ALIAS}.key" "${KEY_DIR}/${KEY_ALIAS}.pub"
   fi
   log "generating ECDSA P-256 signing keypair (alias: ${KEY_ALIAS})"
+  # Generate locally only; upload is handled below via REST to stay idempotent.
   jf evd gen-keys \
     --key-alias "${KEY_ALIAS}" \
     --key-file-path "${KEY_DIR}" \
     --key-file-name "${KEY_ALIAS}" \
-    --upload-public-key=true
+    --upload-public-key=false
   chmod 600 "$PRIV_FILE"
   ok "private key: ${PRIV_FILE}"
+  _upload_pub_key
   ok "public key registered in JFrog trusted-keys store (alias: ${KEY_ALIAS})"
 fi
 
