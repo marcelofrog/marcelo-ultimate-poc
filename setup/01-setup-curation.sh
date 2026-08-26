@@ -48,7 +48,7 @@ JSON
   ok "created remote repo: $key ($package_type)"
 }
 
-create_remote "$(repo_pypi)"   "pypi"   "https://pypi.org"                 pypi
+create_remote "$(repo_pypi)"   "pypi"   "https://files.pythonhosted.org"   pypi
 create_remote "$(repo_npm)"    "npm"    "https://registry.npmjs.org"       npm
 create_remote "$(repo_docker)" "docker" "https://registry-1.docker.io"     docker
 
