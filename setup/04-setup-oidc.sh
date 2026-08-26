@@ -56,7 +56,7 @@ JSON
 {
   "name": "${integration}-map",
   "priority": 100,
-  "claims_json": "{\"repository\": \"${OWNER}/${REPO}\", \"environment\": \"${stage}\"}",
+  "claims": {"repository": "${OWNER}/${REPO}", "environment": "${stage}"},
   "token_spec": {
     "username": "${username}",
     "scope": "applied-permissions/groups:$(group_stage "$stage")",

@@ -169,6 +169,13 @@ for i in "$(oidc_int dev)" "$(oidc_int qa)" "$(oidc_int prod)"; do
   do_delete "oidc integration" "$i" oidc_integration_exists _del_oidc "$i"
 done
 
+# ---------- 5b. JFrog project ------------------------------------------------
+log "Removing JFrog project"
+_del_project() {
+  jf api "/access/api/v1/projects/$1" -X DELETE 2>/dev/null
+}
+do_delete "project" "${POC_PROJECT_KEY}" project_exists _del_project "${POC_PROJECT_KEY}"
+
 # ---------- 6. Curation policies ---------------------------------------------
 log "Removing Curation blocking policies"
 for p in "$(policy_id curation-malicious)" \

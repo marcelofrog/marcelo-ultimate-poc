@@ -278,6 +278,7 @@ load_env() {
   set -a; source "$env_file"; set +a
 
   : "${POC_APP_NAME:?POC_APP_NAME must be set in setup/.env}"
+  : "${POC_PROJECT_KEY:?POC_PROJECT_KEY must be set in setup/.env}"
   validate_app_name "$POC_APP_NAME"
 
   # Activate the requested profile if one was named; otherwise use whatever is
@@ -309,7 +310,7 @@ load_env() {
   POC_DOCKER_REGISTRY_HOST="${POC_DOCKER_REGISTRY_HOST#http://}"
   POC_DOCKER_REGISTRY_HOST="${POC_DOCKER_REGISTRY_HOST%%/*}"
 
-  export JF_URL POC_APP_NAME POC_DOCKER_REGISTRY_HOST
+  export JF_URL POC_APP_NAME POC_PROJECT_KEY POC_DOCKER_REGISTRY_HOST
 }
 
 # ---------- naming helpers ---------------------------------------------------
@@ -487,4 +488,7 @@ curation_condition_id_by_name() {
 }
 evidence_key_exists() {
   [[ "$(api_status_code "/evidence/api/v1/keys/$1")" == "200" ]]
+}
+project_exists() {
+  [[ "$(api_status_code "/access/api/v1/projects/$1")" == "200" ]]
 }

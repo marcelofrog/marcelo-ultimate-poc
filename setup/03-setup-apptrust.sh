@@ -20,8 +20,20 @@ preflight jf jq curl
 load_env
 
 APP="$POC_APP_NAME"
+PROJECT="$POC_PROJECT_KEY"
 CVE_THRESHOLD="${POC_CVE_BLOCK_THRESHOLD:-9.0}"
 MIN_TESTS="${POC_MIN_PASSING_TESTS:-3}"
+
+# =========== 0. JFrog Project =================================================
+log "Ensuring JFrog project '${PROJECT}' exists"
+if project_exists "$PROJECT"; then
+  ok "project already exists: ${PROJECT}"
+else
+  # CLI-gap: no `jf` subcommand for project CRUD; use Access API.
+  rt_api POST "/access/api/v1/projects" \
+    "{\"display_name\":\"${APP}\",\"project_key\":\"${PROJECT}\",\"description\":\"POC project for ${APP}\"}" >/dev/null
+  ok "created project: ${PROJECT}"
+fi
 
 # =========== 1. Stage repositories ===========================================
 create_local_docker() {
@@ -38,14 +50,18 @@ create_local_docker() {
   "rclass": "local",
   "packageType": "docker",
   "dockerApiVersion": "V2",
-  "xrayIndex": true,
-  "description": "POC ${APP} ${stage}-stage image repo",
-  "environments": ["${stage_upper}"]
+  "xrayIndex": "true",
+  "description": "POC ${APP} ${stage}-stage image repo"
 }
 JSON
   jf_admin rt repo-create "$tmp"
   rm -f "$tmp"
-  ok "created local docker repo: $key"
+  # CLI-gap: jf rt repo-create template does not support array values.
+  # Set environments via REST API after creation.
+  jf rt curl -sS -XPOST "api/repositories/${key}" \
+    -H "Content-Type: application/json" \
+    -d "{\"environments\":[\"${stage_upper}\"]}" >/dev/null
+  ok "created local docker repo: $key (environment: ${stage_upper})"
 }
 
 log "Creating stage-scoped local docker repositories"
@@ -55,37 +71,13 @@ create_local_docker "$(repo_stage prod)" prod
 
 # =========== 2. AppTrust application =========================================
 log "Creating AppTrust application '${APP}'"
-# CLI-gap: `jf apptrust application-create` shipped in 2.62 — earlier versions
-# must fall back to the /apptrust/api/v1/applications endpoint. We prefer the
-# CLI form here; if the plugin is missing the script explains the fallback.
-if jf apptrust application-list --format=json 2>/dev/null | jq -e ".[] | select(.key == \"${APP}\")" >/dev/null; then
+if apptrust_application_exists "$APP"; then
   ok "AppTrust application already exists: ${APP}"
 else
-  if jf apptrust --help 2>/dev/null | grep -q application-create; then
-    jf_admin apptrust application-create \
-      --key "${APP}" \
-      --name "${APP}" \
-      --description "Ultimate POC application ${APP}" \
-      --repositories "$(repo_stage dev),$(repo_stage qa),$(repo_stage prod)" \
-      --lifecycle "dev,qa,prod"
-  else
-    warn "jf apptrust plugin missing — using REST fallback"
-    tmp="$(mktemp)"
-    cat > "$tmp" <<JSON
-{
-  "key": "${APP}",
-  "name": "${APP}",
-  "description": "Ultimate POC application ${APP}",
-  "lifecycle": [
-    {"name": "dev",  "repositories": ["$(repo_stage dev)"]},
-    {"name": "qa",   "repositories": ["$(repo_stage qa)"]},
-    {"name": "prod", "repositories": ["$(repo_stage prod)"]}
-  ]
-}
-JSON
-    rt_api POST "/apptrust/api/v1/applications" "$(cat "$tmp")" >/dev/null
-    rm -f "$tmp"
-  fi
+  jf_admin apptrust app-create "${APP}" \
+    --project="${PROJECT}" \
+    --application-name="${APP}" \
+    --desc="Ultimate POC application ${APP}"
   ok "AppTrust application created"
 fi
 

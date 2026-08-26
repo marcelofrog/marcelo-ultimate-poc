@@ -61,6 +61,9 @@ CHECKLIST=(
   "permission|$(perm_target prod promoter)|permission_exists"
   "permission|$(perm_target prod writer)|permission_exists"
 
+  # JFrog project
+  "project|${POC_PROJECT_KEY}|project_exists"
+
   # AppTrust application + gates
   "apptrust app|${APP}|apptrust_application_exists"
   "apptrust gate|$(prefix gate-security)|apptrust_gate_exists ${APP}"
