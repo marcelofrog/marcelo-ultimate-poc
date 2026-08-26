@@ -1,0 +1,19 @@
+# --- POC secrets & keys ------------------------------------------------------
+setup/.env
+evidence/
+!evidence/.keep
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- OS / editors ------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp

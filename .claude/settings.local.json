@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x *)",
+      "Bash(python3 -c \"import yaml; [yaml.safe_load\\(open\\(p\\)\\) for p in ['/Users/marcel/Documents/projects/ultimate-poc/.github/workflows/build.yml','/Users/marcel/Documents/projects/ultimate-poc/.github/workflows/promote-dev-to-qa.yml','/Users/marcel/Documents/projects/ultimate-poc/.github/workflows/promote-qa-to-prod.yml']]\")"
+    ]
+  }
+}

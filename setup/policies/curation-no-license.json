@@ -1,0 +1,21 @@
+{
+  "id": "__APP__-curation-no-license",
+  "name": "__APP__ block packages with no license",
+  "description": "Block packages that do not declare a license.",
+  "enabled": true,
+  "scope": {
+    "repositories": ["__PYPI__", "__NPM__", "__DOCKER__"]
+  },
+  "rule": {
+    "type": "license",
+    "condition": {
+      "license_names": ["Unknown", "Not Found", ""],
+      "match_when": "any"
+    },
+    "action": "block"
+  },
+  "notifications": {
+    "waiver_requestable": true,
+    "notify_emails": []
+  }
+}

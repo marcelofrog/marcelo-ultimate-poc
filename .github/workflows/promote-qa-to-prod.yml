@@ -1,0 +1,96 @@
+# -----------------------------------------------------------------------------
+# promote-qa-to-prod.yml
+#
+# Promotes a qa-stage application version to prod and publishes a signed
+# Evidence attestation over the promotion event, using the same key that
+# signed the build's test-results/image/provenance evidence.
+#
+# Uses the **prod** GitHub Environment (with required-reviewer approval),
+# which forces GitHub to mint an OIDC token whose environment claim is
+# `prod`. Only the prod OIDC integration accepts that token, and it maps
+# to the `<app>-prod-svc` service user whose group has read/promote on
+# <app>-docker-qa-local and write on <app>-docker-prod-local — nothing else.
+# -----------------------------------------------------------------------------
+name: promote-qa-to-prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: 'Application version to promote (e.g. 1.0.42-1234567)'
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: prod   # ← required-reviewer approval enforced here
+    env:
+      APP_NAME:         ${{ vars.POC_APP_NAME }}
+      JF_URL:           ${{ vars.JF_URL }}
+      JF_OIDC_PROVIDER: ${{ vars.JF_OIDC_PROVIDER }}    # prod-scoped OIDC integration
+      EVD_KEY_ALIAS:    ${{ vars.POC_EVD_KEY_ALIAS }}
+
+    steps:
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        with:
+          version: latest
+          oidc-provider-name: ${{ env.JF_OIDC_PROVIDER }}
+          oidc-audience:      jfrog-${{ env.APP_NAME }}
+        env:
+          JF_URL: ${{ env.JF_URL }}
+
+      - name: Materialise signing key
+        env:
+          POC_EVD_SIGNING_KEY: ${{ secrets.POC_EVD_SIGNING_KEY }}
+        run: |
+          [ -n "${POC_EVD_SIGNING_KEY}" ] || { echo "POC_EVD_SIGNING_KEY missing"; exit 1; }
+          [ -n "${EVD_KEY_ALIAS}" ]       || { echo "POC_EVD_KEY_ALIAS missing"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/evd"
+          printf '%s' "${POC_EVD_SIGNING_KEY}" > "$RUNNER_TEMP/evd/signing.key"
+          chmod 600 "$RUNNER_TEMP/evd/signing.key"
+          echo "EVD_KEY_PATH=$RUNNER_TEMP/evd/signing.key" >> "$GITHUB_ENV"
+
+      - name: Show current identity
+        run: |
+          jf rt curl -sS api/system/ping
+          echo "Attempting qa -> prod promotion for ${APP_NAME}@${{ inputs.app_version }}"
+
+      - name: Promote application version to prod
+        run: |
+          jf apptrust application-version-promote \
+            --application "${APP_NAME}" \
+            --version "${{ inputs.app_version }}" \
+            --source-stage qa \
+            --target-stage prod \
+            --wait-for-gates
+
+      - name: Sign promotion evidence
+        run: |
+          cat > /tmp/promotion.predicate.json <<JSON
+          {
+            "event":       "promotion",
+            "source_stage":"qa",
+            "target_stage":"prod",
+            "application": "${APP_NAME}",
+            "version":     "${{ inputs.app_version }}",
+            "actor":       "${{ github.actor }}",
+            "run_id":      "${{ github.run_id }}",
+            "approved_at": "$(date -u +%FT%TZ)"
+          }
+          JSON
+          jf evd create \
+            --predicate           /tmp/promotion.predicate.json \
+            --predicate-type      "https://jfrog.com/evidence/promotion/v1" \
+            --application-key     "${APP_NAME}" \
+            --application-version "${{ inputs.app_version }}" \
+            --key                 "${EVD_KEY_PATH}" \
+            --key-alias           "${EVD_KEY_ALIAS}"
+
+      - name: Wipe signing key from disk
+        if: always()
+        run: rm -f "${EVD_KEY_PATH}" || true

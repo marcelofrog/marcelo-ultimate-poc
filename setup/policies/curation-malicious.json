@@ -1,0 +1,17 @@
+{
+  "id": "__APP__-curation-malicious",
+  "name": "__APP__ block malicious packages",
+  "description": "Block any package flagged as malicious by JFrog Security research.",
+  "enabled": true,
+  "scope": {
+    "repositories": ["__PYPI__", "__NPM__", "__DOCKER__"]
+  },
+  "rule": {
+    "type": "malicious_package",
+    "action": "block"
+  },
+  "notifications": {
+    "waiver_requestable": true,
+    "notify_emails": []
+  }
+}

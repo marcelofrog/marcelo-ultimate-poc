@@ -1,0 +1,15 @@
+{
+  "$comment": "Reference copy of the security gate criteria applied in setup/03-setup-apptrust.sh. Kept alongside the Rego policy so participants can inspect both gates in one place.",
+  "id": "__APP__-gate-security",
+  "name": "Block applicable CVE >= 9.0",
+  "type": "security",
+  "criteria": {
+    "cvss_score_min": 9.0,
+    "applicability": ["applicable"],
+    "action": "block"
+  },
+  "notes": [
+    "Applicability comes from Xray Contextual Analysis. Only CVEs that CA flags as reachable in the built artifact will trip this gate.",
+    "Waivers must be granted in the JFrog UI by a user with the appropriate role."
+  ]
+}

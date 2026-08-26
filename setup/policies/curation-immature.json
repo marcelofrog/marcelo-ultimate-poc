@@ -1,0 +1,20 @@
+{
+  "id": "__APP__-curation-immature",
+  "name": "__APP__ block immature packages (< 7 days)",
+  "description": "Block packages whose current version was published less than 7 days ago. Common defence against typo-squat and account-takeover attacks that push a bad version and expect immediate consumption.",
+  "enabled": true,
+  "scope": {
+    "repositories": ["__PYPI__", "__NPM__", "__DOCKER__"]
+  },
+  "rule": {
+    "type": "immature",
+    "condition": {
+      "maturity_days": 7
+    },
+    "action": "block"
+  },
+  "notifications": {
+    "waiver_requestable": true,
+    "notify_emails": []
+  }
+}
