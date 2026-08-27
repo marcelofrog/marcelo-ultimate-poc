@@ -158,6 +158,10 @@ security_rule_name="$(prefix security-rule)"
 evidence_rule_name="$(prefix evidence-rule)"
 dev_exit_policy_name="$(prefix dev-exit-gate)"
 qa_exit_policy_name="$(prefix qa-exit-gate)"
+prod_release_policy_name="$(prefix prod-release-gate)"
+# Predefined rule id for "QA.Exit AppTrust Gate Certification exist" (template 1008).
+# This is a system rule — it checks that the QA exit gate was certified before releasing.
+QA_EXIT_CERT_RULE_ID="2027"
 
 # --- 4a. Security rule (template 1005 = CVE CVSS, contextual analysis) -------
 SECURITY_RULE_ID=""
@@ -207,11 +211,25 @@ else
   ok "QA exit gate policy created (${qa_exit_policy_name})"
 fi
 
+# --- 4e. PROD release gate: requires QA exit certification -------------------
+# Uses the predefined system rule "QA.Exit AppTrust Gate Certification exist"
+# (rule id 2027, template 1008) — blocks release unless QA exit was certified.
+# gate="release" is the AppTrust gate type that appears in the UI as "Release Gate".
+if unified_policy_exists "$prod_release_policy_name"; then
+  ok "PROD release gate policy already exists (${prod_release_policy_name})"
+else
+  log "creating PROD release gate policy (QA exit certification required)"
+  rt_api POST "/unifiedpolicy/api/v1/policies" \
+    "{\"name\":\"${prod_release_policy_name}\",\"description\":\"Block release to PROD unless QA exit gate was certified\",\"mode\":\"block\",\"enabled\":true,\"rule_ids\":[\"${QA_EXIT_CERT_RULE_ID}\"],\"scope\":{\"type\":\"application\",\"application_keys\":[\"${APP}\"]},\"action\":{\"type\":\"certify_to_gate\",\"stage\":{\"key\":\"PROD\",\"gate\":\"release\"}}}" \
+    >/dev/null 2>&1
+  ok "PROD release gate policy created (${prod_release_policy_name})"
+fi
+
 ok "AppTrust setup complete."
 echo
 echo "Application key : ${APP}"
 echo "Lifecycle       : DEV → QA → PROD"
 echo "Repositories    : $(repo_stage dev), $(repo_stage qa), $(repo_stage prod)"
-echo "Gates           : ${dev_exit_policy_name} (DEV exit), ${qa_exit_policy_name} (QA exit)"
+echo "Gates           : ${dev_exit_policy_name} (DEV exit), ${qa_exit_policy_name} (QA exit), ${prod_release_policy_name} (PROD release)"
 echo
 echo "Next: run ./04-setup-oidc.sh <owner/repo>"
