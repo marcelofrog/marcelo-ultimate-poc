@@ -81,6 +81,41 @@ create_user "$(stage_user dev)"  "$(group_stage dev)"
 create_user "$(stage_user qa)"   "$(group_stage qa)"
 create_user "$(stage_user prod)" "$(group_stage prod)"
 
+# ---------- Permission targets ---------------------------------------------------
+# Each target is idempotent (PUT is create-or-replace).
+# Writers get read+annotate+write on curated remotes AND their stage local.
+# Promoters get read on the source stage local and write on the target.
+create_perm_target() {
+  local name="$1" group="$2" repos_json="$3"
+  if permission_exists "$name"; then
+    ok "permission target already exists: $name — updating"
+  fi
+  jf rt curl -sS -X PUT -H "Content-Type: application/json" \
+    --data "{
+      \"name\": \"${name}\",
+      \"repo\": {
+        \"include-patterns\": [\"**\"],
+        \"exclude-patterns\": [],
+        \"repositories\": ${repos_json},
+        \"actions\": { \"groups\": { \"${group}\": [\"read\",\"annotate\",\"write\"] } }
+      }
+    }" "api/v2/security/permissions/${name}" >/dev/null
+  ok "permission target: $name"
+}
+
+REMOTES="[\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
+DEV_REPOS="[\"$(repo_stage dev)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
+QA_REPOS="[\"$(repo_stage qa)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
+PROD_REPOS="[\"$(repo_stage prod)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
+
+log "Creating permission targets"
+create_perm_target "$(perm_target dev  writer)"   "$(group_stage dev)"  "$DEV_REPOS"
+create_perm_target "$(perm_target qa   writer)"   "$(group_stage qa)"   "$QA_REPOS"
+create_perm_target "$(perm_target prod writer)"   "$(group_stage prod)" "$PROD_REPOS"
+# Promoters need read on source stage and write on target stage
+create_perm_target "$(perm_target qa   promoter)" "$(group_stage qa)"   "[\"$(repo_stage dev)\",\"$(repo_stage qa)\"]"
+create_perm_target "$(perm_target prod promoter)" "$(group_stage prod)" "[\"$(repo_stage qa)\",\"$(repo_stage prod)\"]"
+
 ok "Users setup complete."
 echo
 echo "Next: run ./03-setup-apptrust.sh"
