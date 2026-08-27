@@ -90,6 +90,7 @@ jobs:
       - name: Curation audit (Python)
         working-directory: app
         run: |
+          python --version; pip --version
           jf pip-config --repo-resolve "${PYPI_REMOTE}"
 
           # --format=json produces a parseable report; there is no --fail flag.
@@ -99,7 +100,8 @@ jobs:
           set +e
           jf curation-audit \
             --requirements-file=requirements.txt \
-            --format=json 2>&1 | tee /tmp/curation-audit.json
+            --format=json \
+            --log-level=DEBUG 2>&1 | tee /tmp/curation-audit.json
           AUDIT_RC=${PIPESTATUS[0]}
           set -e
 
