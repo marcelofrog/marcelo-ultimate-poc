@@ -86,7 +86,9 @@ create_user "$(stage_user prod)" "$(group_stage prod)"
 # Writers get read+annotate+write on curated remotes AND their stage local.
 # Promoters get read on the source stage local and write on the target.
 create_perm_target() {
-  local name="$1" group="$2" repos_json="$3"
+  local name="$1" group="$2" repos_json="$3" actions="${4:-read,annotate,write}"
+  # Convert comma-separated actions string to JSON array
+  local actions_json; actions_json="[$(echo "$actions" | sed 's/[^,]*/\"&\"/g')]"
   if permission_exists "$name"; then
     ok "permission target already exists: $name — updating"
   fi
@@ -97,10 +99,10 @@ create_perm_target() {
         \"include-patterns\": [\"**\"],
         \"exclude-patterns\": [],
         \"repositories\": ${repos_json},
-        \"actions\": { \"groups\": { \"${group}\": [\"read\",\"annotate\",\"write\"] } }
+        \"actions\": { \"groups\": { \"${group}\": ${actions_json} } }
       }
     }" "api/v2/security/permissions/${name}" >/dev/null
-  ok "permission target: $name"
+  ok "permission target: $name (actions: $actions)"
 }
 
 REMOTES="[\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
@@ -109,7 +111,7 @@ QA_REPOS="[\"$(repo_stage qa)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker
 PROD_REPOS="[\"$(repo_stage prod)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
 
 log "Creating permission targets"
-create_perm_target "$(perm_target dev  writer)"   "$(group_stage dev)"  "$DEV_REPOS"
+create_perm_target "$(perm_target dev  writer)"   "$(group_stage dev)"  "$DEV_REPOS" "read,annotate,write,delete"
 create_perm_target "$(perm_target qa   writer)"   "$(group_stage qa)"   "$QA_REPOS"
 create_perm_target "$(perm_target prod writer)"   "$(group_stage prod)" "$PROD_REPOS"
 # Promoters need read on source stage and write on target stage
