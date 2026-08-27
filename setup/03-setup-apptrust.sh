@@ -147,15 +147,18 @@ ok "build-info permission target: ${BUILD_INFO_PERM}"
 # The Developer role grants CREATE_APPLICATION_VERSION (needed by build.yml)
 # and DEPLOY_BUILD (needed for jf rt build-publish).
 log "Assigning stage groups to JFrog project '${PROJECT}'"
-assign_group_role() {
-  local group="$1" role="$2"
+assign_group_roles() {
+  local group="$1"; shift
+  local roles_json; roles_json="$(printf '"%s",' "$@" | sed 's/,$//')"
   rt_api PUT "/access/api/v1/projects/${PROJECT}/groups/${group}" \
-    "{\"roles\":[\"${role}\"]}" >/dev/null
-  ok "project group role: ${group} → ${role}"
+    "{\"roles\":[${roles_json}]}" >/dev/null
+  ok "project group roles: ${group} → $*"
 }
-assign_group_role "$(group_stage dev)"  "Developer"
-assign_group_role "$(group_stage qa)"   "Contributor"
-assign_group_role "$(group_stage prod)" "Contributor"
+# Developer: CREATE_APPLICATION_VERSION + DEPLOY_BUILD (needed for build.yml)
+assign_group_roles "$(group_stage dev)"  "Developer"
+# AppTrust Manager adds PROMOTE_APPLICATION_VERSION (needed for promotion workflows)
+assign_group_roles "$(group_stage qa)"   "Contributor" "AppTrust Manager"
+assign_group_roles "$(group_stage prod)" "Contributor" "AppTrust Manager"
 
 # =========== 4. Promotion gates (Unified Policy API) =========================
 # CLI-gap: `jf apptrust` has no gate-management subcommand; use the unified
