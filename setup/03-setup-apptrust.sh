@@ -69,6 +69,19 @@ create_local_docker "$(repo_stage dev)"  dev
 create_local_docker "$(repo_stage qa)"   qa
 create_local_docker "$(repo_stage prod)" prod
 
+# Assign repos to the JFrog project and (re-)apply the correct environment tag.
+# The project assignment via POST api/repositories resets the environment array
+# to ["DEV"], so the tag must be explicitly set afterwards.
+log "Assigning stage repos to project '${PROJECT}'"
+for stage in dev qa prod; do
+  repo="$(repo_stage "$stage")"
+  stage_upper="$(echo "$stage" | tr '[:lower:]' '[:upper:]')"
+  jf rt curl -sS -X POST "api/repositories/${repo}" \
+    -H "Content-Type: application/json" \
+    -d "{\"projectKey\":\"${PROJECT}\",\"environments\":[\"${stage_upper}\"]}" >/dev/null
+  ok "repo ${repo} → project=${PROJECT}, env=${stage_upper}"
+done
+
 # =========== 2. AppTrust application =========================================
 log "Creating AppTrust application '${APP}'"
 if apptrust_application_exists "$APP"; then
