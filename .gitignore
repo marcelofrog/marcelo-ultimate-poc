@@ -12,6 +12,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# --- JFrog CLI local project config (contains machine-specific server IDs) ---
+**/.jfrog/
+
 # --- OS / editors ------------------------------------------------------------
 .DS_Store
 .idea/
