@@ -109,35 +109,17 @@ DEV_REPOS="[\"$(repo_stage dev)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_dock
 QA_REPOS="[\"$(repo_stage qa)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
 PROD_REPOS="[\"$(repo_stage prod)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
 
-log "Creating permission targets"
+log "Creating initial permission targets (stage-local repos not yet created)"
+# Note: stage-local repos don't exist at this point — they are created in
+# 03-setup-apptrust.sh. The Artifactory API silently drops non-existent repos,
+# so these permissions will be missing stage-locals. 03-setup-apptrust.sh
+# re-applies all permissions after creating the stage repos to fix this.
 create_perm_target "$(perm_target dev  writer)"   "$(group_stage dev)"  "$DEV_REPOS" "read,annotate,write,delete"
 create_perm_target "$(perm_target qa   writer)"   "$(group_stage qa)"   "$QA_REPOS"
 create_perm_target "$(perm_target prod writer)"   "$(group_stage prod)" "$PROD_REPOS"
-# Promoters need read on source stage and write on target stage
 create_perm_target "$(perm_target qa   promoter)" "$(group_stage qa)"   "[\"$(repo_stage dev)\",\"$(repo_stage qa)\"]"
 create_perm_target "$(perm_target prod promoter)" "$(group_stage prod)" "[\"$(repo_stage qa)\",\"$(repo_stage prod)\"]"
 
-# Build-info permission — separate section in v2 API (not part of repo section).
-# The dev group needs write access to publish build info via `jf rt build-publish`.
-# Note: this is superseded by the project Developer role added in 03-setup-apptrust.sh,
-# but kept here as an explicit standalone permission for completeness.
-log "Creating build-info permission target for dev group"
-BUILD_INFO_PERM="$(prefix dev-build-info)"
-if permission_exists "$BUILD_INFO_PERM"; then
-  ok "build-info permission already exists: $BUILD_INFO_PERM — updating"
-fi
-jf rt curl -sS -X PUT -H "Content-Type: application/json" \
-  --data "{
-    \"name\": \"${BUILD_INFO_PERM}\",
-    \"build\": {
-      \"include-patterns\": [\"${APP}/**\"],
-      \"exclude-patterns\": [],
-      \"repositories\": [\"artifactory-build-info\"],
-      \"actions\": { \"groups\": { \"$(group_stage dev)\": [\"read\",\"write\",\"annotate\",\"delete\",\"manage\",\"managedXrayMeta\"] } }
-    }
-  }" "api/v2/security/permissions/${BUILD_INFO_PERM}" >/dev/null
-ok "build-info permission target: ${BUILD_INFO_PERM}"
-
-ok "Users setup complete."
+ok "Users setup complete (permissions will be finalised by 03-setup-apptrust.sh)."
 echo
 echo "Next: run ./03-setup-apptrust.sh"

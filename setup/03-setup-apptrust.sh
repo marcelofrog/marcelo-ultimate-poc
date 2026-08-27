@@ -95,40 +95,52 @@ else
 fi
 
 # =========== 3. Stage permission targets =====================================
-log "Creating stage-scoped permission targets"
+# Re-apply all permission targets now that the stage-local repos exist.
+# 02-setup-users.sh ran first and created permissions, but at that point the
+# stage-local repos did not yet exist (they are created above in section 1),
+# so the Artifactory API silently dropped them from the repo list. Re-applying
+# here guarantees all repos are present: stage-locals + curated remotes.
+log "Re-applying permission targets (stage repos now exist)"
 
-# Permission target JSON template:
-#   actions: read | write | annotate | delete | manage | promote
-mk_perm() {
-  local pt_name="$1" repo="$2" group="$3" actions_json="$4"
-  local tmp; tmp="$(mktemp)"
-  cat > "$tmp" <<JSON
-{
-  "name": "${pt_name}",
-  "repo": {
-    "repositories": ["${repo}"],
-    "actions": {
-      "groups": {
-        "${group}": ${actions_json}
+apply_perm() {
+  local name="$1" group="$2" repos_json="$3" actions="${4:-read,annotate,write}"
+  local actions_json; actions_json="[$(echo "$actions" | sed 's/[^,]*/\"&\"/g')]"
+  jf rt curl -sS -X PUT -H "Content-Type: application/json" \
+    --data "{
+      \"name\": \"${name}\",
+      \"repo\": {
+        \"include-patterns\": [\"**\"],
+        \"exclude-patterns\": [],
+        \"repositories\": ${repos_json},
+        \"actions\": { \"groups\": { \"${group}\": ${actions_json} } }
       }
-    }
-  }
-}
-JSON
-  jf rt curl -sS -X PUT -H 'Content-Type: application/json' \
-    --data "@${tmp}" "api/v2/security/permissions/${pt_name}" >/dev/null
-  rm -f "$tmp"
-  ok "permission target: ${pt_name}"
+    }" "api/v2/security/permissions/${name}" >/dev/null
+  ok "permission target: ${name}"
 }
 
-# Role suffixes read as English so admins can grok the target from its name:
-#   writer   — can push/modify artifacts in the named repo
-#   promoter — can read + promote out of the named repo
-mk_perm "$(perm_target dev  writer)"   "$(repo_stage dev)"  "$(group_stage dev)"  '["read","write","annotate"]'
-mk_perm "$(perm_target qa   promoter)" "$(repo_stage dev)"  "$(group_stage qa)"   '["read","promote"]'
-mk_perm "$(perm_target qa   writer)"   "$(repo_stage qa)"   "$(group_stage qa)"   '["read","write","annotate"]'
-mk_perm "$(perm_target prod promoter)" "$(repo_stage qa)"   "$(group_stage prod)" '["read","promote"]'
-mk_perm "$(perm_target prod writer)"   "$(repo_stage prod)" "$(group_stage prod)" '["read","write","annotate"]'
+DEV_REPOS="[\"$(repo_stage dev)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
+QA_REPOS="[\"$(repo_stage qa)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
+PROD_REPOS="[\"$(repo_stage prod)\",\"$(repo_pypi)\",\"$(repo_npm)\",\"$(repo_docker)\"]"
+
+apply_perm "$(perm_target dev  writer)"   "$(group_stage dev)"  "$DEV_REPOS"                                                    "read,annotate,write,delete"
+apply_perm "$(perm_target qa   writer)"   "$(group_stage qa)"   "$QA_REPOS"
+apply_perm "$(perm_target prod writer)"   "$(group_stage prod)" "$PROD_REPOS"
+apply_perm "$(perm_target qa   promoter)" "$(group_stage qa)"   "[\"$(repo_stage dev)\",\"$(repo_stage qa)\"]"
+apply_perm "$(perm_target prod promoter)" "$(group_stage prod)" "[\"$(repo_stage qa)\",\"$(repo_stage prod)\"]"
+
+# Build-info permission (v2 build section — must be separate from repo section).
+BUILD_INFO_PERM="$(prefix dev-build-info)"
+jf rt curl -sS -X PUT -H "Content-Type: application/json" \
+  --data "{
+    \"name\": \"${BUILD_INFO_PERM}\",
+    \"build\": {
+      \"include-patterns\": [\"${APP}/**\"],
+      \"exclude-patterns\": [],
+      \"repositories\": [\"artifactory-build-info\"],
+      \"actions\": { \"groups\": { \"$(group_stage dev)\": [\"read\",\"write\",\"annotate\",\"delete\",\"manage\",\"managedXrayMeta\"] } }
+    }
+  }" "api/v2/security/permissions/${BUILD_INFO_PERM}" >/dev/null
+ok "build-info permission target: ${BUILD_INFO_PERM}"
 
 # =========== 3b. Project group roles =========================================
 # Assign lifecycle-stage groups to the JFrog project with the appropriate role.
