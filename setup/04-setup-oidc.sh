@@ -51,7 +51,11 @@ JSON
     *)       warn "unexpected status $http creating integration ${integration}" ;;
   esac
 
-  # 2. Create the single identity mapping that binds environment+repo to the user
+  # 2. Create the single identity mapping that binds environment+repo to the user.
+  # Use user-scoped token (applied-permissions/user:) so the token includes both
+  # Artifactory permissions AND project role capabilities (e.g. AppTrust Manager
+  # → PROMOTE_APPLICATION_VERSION). Group-scoped tokens only carry Artifactory
+  # permission-target grants and miss project role capabilities.
   cat > "$tmp" <<JSON
 {
   "name": "${integration}-map",
@@ -59,7 +63,7 @@ JSON
   "claims": {"repository": "${OWNER}/${REPO}", "environment": "${stage}"},
   "token_spec": {
     "username": "${username}",
-    "scope": "applied-permissions/groups:$(group_stage "$stage")",
+    "scope": "applied-permissions/user:${username}",
     "expires_in": 3600
   }
 }
