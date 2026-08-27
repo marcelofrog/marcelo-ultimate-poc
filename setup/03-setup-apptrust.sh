@@ -117,6 +117,21 @@ mk_perm "$(perm_target qa   writer)"   "$(repo_stage qa)"   "$(group_stage qa)" 
 mk_perm "$(perm_target prod promoter)" "$(repo_stage qa)"   "$(group_stage prod)" '["read","promote"]'
 mk_perm "$(perm_target prod writer)"   "$(repo_stage prod)" "$(group_stage prod)" '["read","write","annotate"]'
 
+# =========== 3b. Project group roles =========================================
+# Assign lifecycle-stage groups to the JFrog project with the appropriate role.
+# The Developer role grants CREATE_APPLICATION_VERSION (needed by build.yml)
+# and DEPLOY_BUILD (needed for jf rt build-publish).
+log "Assigning stage groups to JFrog project '${PROJECT}'"
+assign_group_role() {
+  local group="$1" role="$2"
+  rt_api PUT "/access/api/v1/projects/${PROJECT}/groups/${group}" \
+    "{\"roles\":[\"${role}\"]}" >/dev/null
+  ok "project group role: ${group} → ${role}"
+}
+assign_group_role "$(group_stage dev)"  "Developer"
+assign_group_role "$(group_stage qa)"   "Contributor"
+assign_group_role "$(group_stage prod)" "Contributor"
+
 # =========== 4. Promotion gates (Unified Policy API) =========================
 # CLI-gap: `jf apptrust` has no gate-management subcommand; use the unified
 # policy REST API at /unifiedpolicy/api/v1. Stage keys must be uppercase.

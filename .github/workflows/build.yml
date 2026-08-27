@@ -98,7 +98,7 @@ jobs:
           # we also parse the JSON to display exactly which packages were blocked
           # and under which policy.
           set +e
-          JFROG_CLI_LOG_LEVEL=DEBUG jf curation-audit \
+          jf curation-audit \
             --requirements-file=requirements.txt \
             --format=json 2>&1 | tee /tmp/curation-audit.json
           AUDIT_RC=${PIPESTATUS[0]}
