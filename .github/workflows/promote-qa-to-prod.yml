@@ -62,12 +62,7 @@ jobs:
 
       - name: Promote application version to prod
         run: |
-          jf apptrust application-version-promote \
-            --application "${APP_NAME}" \
-            --version "${{ inputs.app_version }}" \
-            --source-stage qa \
-            --target-stage prod \
-            --wait-for-gates
+          jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" PROD
 
       - name: Sign promotion evidence
         run: |

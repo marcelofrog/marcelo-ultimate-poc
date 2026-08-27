@@ -68,12 +68,7 @@ jobs:
       # either the security or Rego gate stops the promotion — nothing moves.
       - name: Promote application version to qa
         run: |
-          jf apptrust application-version-promote \
-            --application "${APP_NAME}" \
-            --version "${{ inputs.app_version }}" \
-            --source-stage dev \
-            --target-stage qa \
-            --wait-for-gates
+          jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" QA
 
       - name: Sign promotion evidence
         run: |
