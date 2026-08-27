@@ -221,8 +221,8 @@ jobs:
       - name: Install test deps from curated PyPI
         working-directory: app
         run: |
-          pip config set global.index-url "https://${JF_DOCKER_REGISTRY}/artifactory/api/pypi/${PYPI_REMOTE}/simple"
-          pip install -r requirements-dev.txt
+          jf pip-config --repo-resolve "${PYPI_REMOTE}"
+          jf pip install -r requirements-dev.txt
 
       - name: Run pytest suite
         working-directory: app
