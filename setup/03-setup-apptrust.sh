@@ -154,11 +154,24 @@ assign_group_roles() {
     "{\"roles\":[${roles_json}]}" >/dev/null
   ok "project group roles: ${group} → $*"
 }
+
+# Custom role: AppTrust Manager predefined role only covers DEV+PROD environments.
+# Promoting to QA requires a role whose environment scope includes QA.
+# CUSTOM type roles can cover all three; CUSTOM_GLOBAL is rejected by this API.
+PROMOTER_ROLE="apptrust-promoter"
+if rt_api GET "/access/api/v1/projects/${PROJECT}/roles/${PROMOTER_ROLE}" 2>/dev/null | jq -e '.name' >/dev/null 2>&1; then
+  ok "custom role '${PROMOTER_ROLE}' already exists"
+else
+  rt_api POST "/access/api/v1/projects/${PROJECT}/roles" \
+    "{\"name\":\"${PROMOTER_ROLE}\",\"type\":\"CUSTOM\",\"description\":\"Promote AppTrust versions across all stages (DEV→QA→PROD)\",\"environments\":[\"DEV\",\"QA\",\"PROD\"],\"actions\":[\"READ_APPLICATION\",\"READ_APPLICATION_VERSION\",\"PROMOTE_APPLICATION_VERSION\"]}" >/dev/null
+  ok "created custom role '${PROMOTER_ROLE}' (DEV+QA+PROD, PROMOTE_APPLICATION_VERSION)"
+fi
+
 # Developer: CREATE_APPLICATION_VERSION + DEPLOY_BUILD (needed for build.yml)
 assign_group_roles "$(group_stage dev)"  "Developer"
-# AppTrust Manager adds PROMOTE_APPLICATION_VERSION (needed for promotion workflows)
-assign_group_roles "$(group_stage qa)"   "Contributor" "AppTrust Manager"
-assign_group_roles "$(group_stage prod)" "Contributor" "AppTrust Manager"
+# Contributor + AppTrust Manager (admin tasks) + apptrust-promoter (QA env scope)
+assign_group_roles "$(group_stage qa)"   "Contributor" "AppTrust Manager" "${PROMOTER_ROLE}"
+assign_group_roles "$(group_stage prod)" "Contributor" "AppTrust Manager" "${PROMOTER_ROLE}"
 
 # =========== 4. Promotion gates (Unified Policy API) =========================
 # CLI-gap: `jf apptrust` has no gate-management subcommand; use the unified
