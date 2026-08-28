@@ -1,0 +1,53 @@
+# -----------------------------------------------------------------------------
+# promote-unassigned-to-dev.yml
+#
+# Promotes an unassigned application version to the DEV lifecycle stage.
+#
+# Versions created by the build workflow land in the "unassigned" state
+# until explicitly promoted. Run this workflow to move a version into DEV
+# before it can proceed through the normal dev→qa→prod promotion chain.
+#
+# Uses the **dev** GitHub Environment so the OIDC token is minted for the
+# dev-stage identity (testapi-23jh-dev-svc) which holds the Developer +
+# apptrust-promoter roles needed to call version-promote.
+# -----------------------------------------------------------------------------
+name: promote-unassigned-to-dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: 'Application version to promote to DEV (e.g. 1.0.42-1234567)'
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      APP_NAME:         ${{ vars.POC_APP_NAME }}
+      JF_URL:           ${{ vars.JF_URL }}
+      JF_OIDC_PROVIDER: ${{ vars.JF_OIDC_PROVIDER }}
+
+    steps:
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        with:
+          version: latest
+          oidc-provider-name: ${{ env.JF_OIDC_PROVIDER }}
+          oidc-audience:      jfrog-${{ env.APP_NAME }}
+        env:
+          JF_URL: ${{ env.JF_URL }}
+
+      - name: Show current identity
+        run: |
+          jf rt curl -sS api/system/ping
+          echo "Promoting ${APP_NAME}@${{ inputs.app_version }} from unassigned → DEV"
+
+      - name: Promote application version to DEV
+        run: |
+          jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" DEV
