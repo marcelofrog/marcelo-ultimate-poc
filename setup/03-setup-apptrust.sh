@@ -167,8 +167,10 @@ else
   ok "created custom role '${PROMOTER_ROLE}' (DEV+QA+PROD, PROMOTE_APPLICATION_VERSION)"
 fi
 
-# Developer: CREATE_APPLICATION_VERSION + DEPLOY_BUILD (needed for build.yml)
-assign_group_roles "$(group_stage dev)"  "Developer"
+# Developer: CREATE_APPLICATION_VERSION + DEPLOY_BUILD (needed for build.yml).
+# apptrust-promoter: PROMOTE_APPLICATION_VERSION so build.yml can promote
+# the newly-created version from unassigned → DEV in the same workflow run.
+assign_group_roles "$(group_stage dev)"  "Developer" "${PROMOTER_ROLE}"
 # Contributor + AppTrust Manager (admin tasks) + apptrust-promoter (QA env scope)
 assign_group_roles "$(group_stage qa)"   "Contributor" "AppTrust Manager" "${PROMOTER_ROLE}"
 assign_group_roles "$(group_stage prod)" "Contributor" "AppTrust Manager" "${PROMOTER_ROLE}"
