@@ -56,6 +56,9 @@ jobs:
           version: latest
           oidc-provider-name: ${{ env.JF_OIDC_PROVIDER }}
           oidc-audience:      jfrog-${{ env.APP_NAME }}
+          disable-auto-evidence-collection: true   # we sign evidence manually with our own key;
+                                                   # auto-collection uses default-lifecycle-key which
+                                                   # is misconfigured on this instance and breaks promotion
         env:
           JF_URL: ${{ env.JF_URL }}
 

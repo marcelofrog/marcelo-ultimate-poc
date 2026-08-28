@@ -41,6 +41,7 @@ jobs:
           version: latest
           oidc-provider-name: ${{ env.JF_OIDC_PROVIDER }}
           oidc-audience:      jfrog-${{ env.APP_NAME }}
+          disable-auto-evidence-collection: true
         env:
           JF_URL: ${{ env.JF_URL }}
 
