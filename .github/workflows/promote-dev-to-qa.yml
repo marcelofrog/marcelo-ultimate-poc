@@ -68,7 +68,21 @@ jobs:
       # either the security or Rego gate stops the promotion — nothing moves.
       - name: Promote application version to qa
         run: |
-          jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" QA
+          set +e
+          output=$(jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" QA 2>&1)
+          exit_code=$?
+          echo "${output}"
+          if [ $exit_code -ne 0 ]; then
+            reason=$(echo "${output}" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
+            [ -z "${reason}" ] && reason="${output}"
+            echo "::error::Promotion DEV→QA failed: ${reason}"
+            {
+              echo "## Promotion DEV→QA Failed"
+              echo "**Version:** ${{ inputs.app_version }}"
+              echo "**Reason:** ${reason}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit $exit_code
+          fi
 
       - name: Sign promotion evidence
         run: |

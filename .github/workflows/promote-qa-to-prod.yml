@@ -62,7 +62,21 @@ jobs:
 
       - name: Promote application version to prod
         run: |
-          jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" PROD
+          set +e
+          output=$(jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" PROD 2>&1)
+          exit_code=$?
+          echo "${output}"
+          if [ $exit_code -ne 0 ]; then
+            reason=$(echo "${output}" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
+            [ -z "${reason}" ] && reason="${output}"
+            echo "::error::Promotion QA→PROD failed: ${reason}"
+            {
+              echo "## Promotion QA→PROD Failed"
+              echo "**Version:** ${{ inputs.app_version }}"
+              echo "**Reason:** ${reason}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit $exit_code
+          fi
 
       - name: Sign promotion evidence
         run: |
