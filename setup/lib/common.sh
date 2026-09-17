@@ -496,6 +496,11 @@ evidence_key_kid_by_alias() {
   jf api "/artifactory/api/security/keys/trusted" -X GET 2>/dev/null \
     | jq -r --arg a "$1" '.keys[] | select(.alias == $a) | .kid' | head -1
 }
+keypair_exists() {
+  # Signing key PAIRS (private + public) live in Keys Management, a different
+  # store from the public-only trusted keys probed by evidence_key_exists.
+  [[ "$(api_status_code "/artifactory/api/security/keypair/$1")" == "200" ]]
+}
 project_exists() {
   [[ "$(api_status_code "/access/api/v1/projects/$1")" == "200" ]]
 }

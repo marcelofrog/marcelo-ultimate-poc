@@ -9,7 +9,7 @@ setup/
 ├── 01-setup-curation.sh       ← curated remotes + blocking policies
 ├── 02-setup-users.sh          ← dev/qa/prod users + groups
 ├── 03-setup-apptrust.sh       ← app + stage repos + permissions + gates
-├── 03a-setup-signing-key.sh   ← generate ed25519 key + push to GitHub
+├── 03a-setup-signing-key.sh   ← generate both signing keys + push to GitHub
 ├── 04-setup-oidc.sh           ← three OIDC integrations for GitHub
 ├── 99-teardown.sh             ← delete everything (with --dry-run + safety flags)
 └── policies/                  ← curation-policy JSON payloads
@@ -17,7 +17,7 @@ setup/
 
 ## Step 0 — Collision check (`00-check-collisions.sh`)
 
-Runs first. Enumerates all 27 JFrog objects the pipeline would create,
+Runs first. Enumerates all 32 JFrog objects the pipeline would create,
 probes the instance for each, and prints a matrix like:
 
 ```
@@ -83,6 +83,19 @@ The heart of the POC. Creates:
    - **Rego gate** — evaluates [policies/test-count.rego](../policies/test-count.rego) with `min_passing_tests = ${POC_MIN_PASSING_TESTS}`. Requires an evidence attestation of predicate type `https://jfrog.com/evidence/test-results/v1` with at least the configured number of passing tests and zero failures.
 
 Both gates apply to every stage transition of this application.
+
+## Step 3a — Signing keys (`03a-setup-signing-key.sh`)
+
+The POC signs with keys it creates itself, so nothing depends on pre-existing platform key material. There are two keys because there are two signing paths:
+
+| Key | Where it signs | What JFrog stores | Used by |
+|-----|----------------|-------------------|---------|
+| `${APP}-evd-key` (ECDSA P-256) | On the GitHub runner | Public half, in trusted keys | Every `jf evd create` attestation |
+| `${APP}-lifecycle-key` (RSA-2048) | Inside Artifactory | Full key pair, in Keys Management | The application-version manifest (`release-bundle.json.evd`) |
+
+The evidence key can stay client-side because the runner does the signing; its private half lives in the `POC_EVD_SIGNING_KEY` GitHub secret.
+
+The lifecycle key cannot. AppTrust signs the version manifest server-side when the version is created, so Artifactory needs the private half. That key is selectable only through the `X-JFrog-Signing-Key-Name` header on the create-version API — `jf apptrust version-create` has no flag for it, which is why [build.yml](../.github/workflows/build.yml) calls the REST endpoint directly. Omit the header and AppTrust falls back to the shared `default-lifecycle-key`, and the DEV→QA copy promotion later fails to verify that signature.
 
 ## Step 4 — OIDC (`04-setup-oidc.sh <owner/repo>`)
 
@@ -152,7 +165,7 @@ sessions or resetting between iterations.
 8. Curated remote repositories   (pypi / npm / docker)
 9. Service users                 (must go before groups)
 10. Groups
-11. Evidence signing key
+11. Signing keys                 (evidence trusted key + lifecycle key pair)
 ```
 
 **Flags:**
@@ -163,7 +176,7 @@ sessions or resetting between iterations.
 | `--yes` / `-y`           | Skip the interactive "type the app name" prompt (for CI use). |
 | `--purge-builds`         | Also delete build-info records under the application name. |
 | `--purge-local-keys`     | Also delete `evidence/keys/` on your workstation. |
-| `--purge-github-secret`  | Also delete `POC_EVD_SIGNING_KEY` + `POC_EVD_KEY_ALIAS` from the GitHub repo in `.env`. Requires `gh auth login`. |
+| `--purge-github-secret`  | Also delete `POC_EVD_SIGNING_KEY`, `POC_EVD_KEY_ALIAS` and `POC_LIFECYCLE_KEY_NAME` from the GitHub repo in `.env`. Requires `gh auth login`. |
 
 **Reporting:** every object prints one of `deleted`, `absent`, or `ERROR`.
 A missing object is not a failure — the script tolerates half-applied

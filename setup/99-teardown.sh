@@ -11,15 +11,16 @@
 #         →   permission targets   →   OIDC integrations
 #         →   curation policies    →   repositories (local, then remote)
 #         →   users                →   groups
-#         →   evidence signing key
+#         →   signing keys (evidence trusted key + lifecycle key pair)
 #
 # Flags:
 #   --dry-run              print the plan, don't call any DELETE.
 #   --yes / -y             skip the interactive confirmation prompt.
 #   --purge-builds         also delete build-info records under this app.
 #   --purge-local-keys     also delete evidence/keys/ on disk.
-#   --purge-github-secret  also delete POC_EVD_SIGNING_KEY + POC_EVD_KEY_ALIAS
-#                          from the GitHub repo referenced in .env.
+#   --purge-github-secret  also delete POC_EVD_SIGNING_KEY, POC_EVD_KEY_ALIAS
+#                          and POC_LIFECYCLE_KEY_NAME from the GitHub repo
+#                          referenced in .env.
 #
 # The script tolerates missing objects — a resource that isn't present is
 # reported as "absent", not "failed". At the end it prints a summary of
@@ -116,6 +117,7 @@ _del_evd_key()    {
   [[ -n "$kid" ]] || return 1
   jf api "/artifactory/api/security/keys/trusted/${kid}" -X DELETE >/dev/null
 }
+_del_keypair()    { jf api "/artifactory/api/security/keypair/$1" -X DELETE >/dev/null; }
 _del_unified_policy() {
   local id; id="$(unified_policy_id_by_name "$1" 2>/dev/null || true)"
   [[ -n "$id" ]] || return 1
@@ -131,8 +133,10 @@ _del_unified_rule() {
 log "Removing AppTrust application versions"
 if apptrust_application_exists "$APP"; then
   # List every version and delete it. If none exist, this loop no-ops.
-  versions="$(rt_api GET "/apptrust/api/v1/applications/${APP}/versions" "" 2>/dev/null \
-              | jq -r '.[]?.version // empty')"
+  # GET /versions returns { total, offset, limit, versions: [{ version, ... }] }
+  # not a bare array — indexing that wrapper with .[]?.version fails jq.
+  versions="$(rt_api GET "/apptrust/api/v1/applications/${APP}/versions?limit=1000" "" 2>/dev/null \
+              | jq -r '.versions[]? | .version // empty' 2>/dev/null || true)"
   if [[ -n "$versions" ]]; then
     while read -r v; do
       [[ -z "$v" ]] && continue
@@ -243,9 +247,12 @@ for g in "$(group_stage dev)" "$(group_stage qa)" "$(group_stage prod)"; do
   do_delete "group" "$g" group_exists _del_group "$g"
 done
 
-# ---------- 9. Evidence signing key ------------------------------------------
-log "Removing Evidence signing key"
+# ---------- 9. Signing keys --------------------------------------------------
+log "Removing signing keys"
 do_delete "evidence key" "${APP}-evd-key" evidence_key_exists _del_evd_key "${APP}-evd-key"
+# Lifecycle key lives in two stores: the key pair and its trusted public half.
+do_delete "signing keypair" "${APP}-lifecycle-key" keypair_exists _del_keypair "${APP}-lifecycle-key"
+do_delete "trusted key" "${APP}-lifecycle-key" evidence_key_exists _del_evd_key "${APP}-lifecycle-key"
 
 # ---------- 10. Optional: build info -----------------------------------------
 if (( PURGE_BUILDS == 1 )); then
@@ -285,6 +292,7 @@ if (( PURGE_GH_SECRET == 1 )); then
     if (( DRY_RUN == 1 )); then
       printf "  %-18s  %-45s  ${C_BLUE}would delete${C_RESET}\n" "github secret" "POC_EVD_SIGNING_KEY"
       printf "  %-18s  %-45s  ${C_BLUE}would delete${C_RESET}\n" "github var"    "POC_EVD_KEY_ALIAS"
+      printf "  %-18s  %-45s  ${C_BLUE}would delete${C_RESET}\n" "github var"    "POC_LIFECYCLE_KEY_NAME"
     else
       gh secret   delete POC_EVD_SIGNING_KEY --repo "$POC_GITHUB_REPO" 2>/dev/null \
         && printf "  %-18s  %-45s  ${C_GREEN}deleted${C_RESET}\n" "github secret" "POC_EVD_SIGNING_KEY" \
@@ -292,6 +300,9 @@ if (( PURGE_GH_SECRET == 1 )); then
       gh variable delete POC_EVD_KEY_ALIAS   --repo "$POC_GITHUB_REPO" 2>/dev/null \
         && printf "  %-18s  %-45s  ${C_GREEN}deleted${C_RESET}\n" "github var" "POC_EVD_KEY_ALIAS" \
         || printf "  %-18s  %-45s  ${C_YELLOW}absent${C_RESET}\n" "github var" "POC_EVD_KEY_ALIAS"
+      gh variable delete POC_LIFECYCLE_KEY_NAME --repo "$POC_GITHUB_REPO" 2>/dev/null \
+        && printf "  %-18s  %-45s  ${C_GREEN}deleted${C_RESET}\n" "github var" "POC_LIFECYCLE_KEY_NAME" \
+        || printf "  %-18s  %-45s  ${C_YELLOW}absent${C_RESET}\n" "github var" "POC_LIFECYCLE_KEY_NAME"
     fi
   fi
 fi

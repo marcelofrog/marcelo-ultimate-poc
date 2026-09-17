@@ -37,7 +37,9 @@ Every build produces **three signed Evidence attestations** against the same App
 | `https://jfrog.com/evidence/artifact/v1`     | app version + docker manifest | image tag, immutable digest, base image, builder |
 | `https://slsa.dev/provenance/v1`             | app version | SLSA-style build provenance (git URI+SHA, workflow file, actor, materials) |
 
-Each subsequent promotion (`dev→qa`, `qa→prod`) publishes a fifth predicate type, `https://jfrog.com/evidence/promotion/v1`, signed with the same key. That means a prod-stage application version carries a fully verifiable timeline: what was built, from what source, by which tests, and who moved it forward.
+Alongside these, AppTrust signs the application-version manifest itself (`release-bundle.json.evd`, predicate `https://jfrog.com/evidence/release-bundle/v1`). That signature is produced inside Artifactory, not on the runner, so it uses the separate `${APP}-lifecycle-key` key pair that setup uploaded to Keys Management — see [Step 3a](01-environment-setup.md#step-3a--signing-keys-03a-setup-signing-keysh). Copy promotion re-verifies it on every stage transition.
+
+Each subsequent promotion (`dev→qa`, `qa→prod`) publishes a fifth predicate type, `https://jfrog.com/evidence/promotion/v1`, signed with the same evidence key. That means a prod-stage application version carries a fully verifiable timeline: what was built, from what source, by which tests, and who moved it forward.
 
 `pytest.ini` emits the JSON report the test-results predicate is built from:
 

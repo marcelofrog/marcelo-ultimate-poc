@@ -4,7 +4,13 @@
       "Bash(chmod +x *)",
       "Bash(python3 -c \"import yaml; [yaml.safe_load\\(open\\(p\\)\\) for p in ['/Users/marcel/Documents/projects/ultimate-poc/.github/workflows/build.yml','/Users/marcel/Documents/projects/ultimate-poc/.github/workflows/promote-dev-to-qa.yml','/Users/marcel/Documents/projects/ultimate-poc/.github/workflows/promote-qa-to-prod.yml']]\")",
       "Bash(bash 00-run-all.sh)",
-      "Bash(bash *)"
+      "Bash(bash *)",
+      "WebFetch(domain:docs.jfrog.com)",
+      "WebFetch(domain:api.jfrog.com)",
+      "Bash(gh api *)",
+      "Bash(gh run *)",
+      "Bash(sed -n '60,85p' .github/workflows/promote-dev-to-qa.yml)",
+      "Bash(sed -n '58,80p' .github/workflows/promote-qa-to-prod.yml)"
     ]
   }
 }

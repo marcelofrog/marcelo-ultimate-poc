@@ -81,8 +81,10 @@ CHECKLIST=(
   "oidc integration|$(oidc_int qa)|oidc_integration_exists"
   "oidc integration|$(oidc_int prod)|oidc_integration_exists"
 
-  # Evidence signing key
+  # Signing keys — evidence (public only) + lifecycle (full key pair)
   "evidence key|${APP}-evd-key|evidence_key_exists"
+  "signing keypair|${APP}-lifecycle-key|keypair_exists"
+  "trusted key|${APP}-lifecycle-key|evidence_key_exists"
 )
 
 # ---------- probe ------------------------------------------------------------

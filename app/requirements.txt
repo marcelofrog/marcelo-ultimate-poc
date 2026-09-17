@@ -8,3 +8,6 @@ pydantic==2.10.3
 requests==2.32.3
 httpx==0.28.1
 python-multipart==0.0.20
+
+# Uncomment and build app to trigger a CUration malicious block
+#jfrog-curation-malicious-dummy==1.0.0

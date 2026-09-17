@@ -9,7 +9,8 @@
 #   3. Build the docker image pulling base image + wheels from the curated
 #      remotes.
 #   4. Push the image to the dev-stage local repo.
-#   5. Create an AppTrust application version tagged with the run id.
+#   5. Create an AppTrust application version tagged with the run id, signed
+#      with this project's own lifecycle key pair.
 #   6. Execute the pytest suite.
 #   7. Sign and publish THREE Evidence attestations against the application
 #      version, all signed with the same key that was provisioned by
@@ -41,6 +42,7 @@ jobs:
       JF_DOCKER_REGISTRY:  ${{ vars.JF_DOCKER_REGISTRY }}
       JF_OIDC_PROVIDER:    ${{ vars.JF_OIDC_PROVIDER }}      # dev-scoped OIDC integration
       EVD_KEY_ALIAS:       ${{ vars.POC_EVD_KEY_ALIAS }}     # e.g. ultimate-demo-evd-key
+      LIFECYCLE_KEY_NAME:  ${{ vars.POC_LIFECYCLE_KEY_NAME }}  # Artifactory key pair that signs the version manifest
       DEV_REPO:            ${{ vars.POC_APP_NAME }}-docker-dev-local
       PYPI_REMOTE:         ${{ vars.POC_APP_NAME }}-pypi-remote
       DOCKER_REMOTE:       ${{ vars.POC_APP_NAME }}-docker-remote
@@ -57,8 +59,8 @@ jobs:
           oidc-provider-name: ${{ env.JF_OIDC_PROVIDER }}
           oidc-audience:      jfrog-${{ env.APP_NAME }}
           disable-auto-evidence-collection: true   # we sign evidence manually with our own key;
-                                                   # auto-collection uses default-lifecycle-key which
-                                                   # is misconfigured on this instance and breaks promotion
+                                                   # auto-collection would sign with the shared
+                                                   # default-lifecycle-key, which this POC does not own
         env:
           JF_URL: ${{ env.JF_URL }}
 
@@ -208,12 +210,31 @@ jobs:
           jf rt build-publish     "${APP_NAME}" "${{ github.run_id }}"
 
       # ---------- 5. AppTrust application version -----------------------------
+      # Called over REST rather than `jf apptrust version-create` because the
+      # signing key for the version manifest is selectable only via the
+      # X-JFrog-Signing-Key-Name header, which the CLI does not expose. Without
+      # it AppTrust signs with the shared default-lifecycle-key, and copy
+      # promotion later fails to verify that signature.
       - name: Create AppTrust application version
         run: |
-          # positional args: <app-key> <version>
+          if [ -z "${LIFECYCLE_KEY_NAME}" ]; then
+            echo "::error::POC_LIFECYCLE_KEY_NAME variable missing. Did 03a-setup-signing-key.sh run to completion?"
+            exit 1
+          fi
+
           # source is the build info published in the previous step.
-          jf apptrust version-create "${APP_NAME}" "${{ steps.tag.outputs.app_version }}" \
-            --source-type-builds="name=${APP_NAME}, id=${{ github.run_id }}"
+          jq -n \
+            --arg version "${{ steps.tag.outputs.app_version }}" \
+            --arg build   "${APP_NAME}" \
+            --arg number  "${{ github.run_id }}" \
+            '{version: $version, sources: {builds: [{name: $build, number: $number}]}}' \
+            > "$RUNNER_TEMP/version-create.json"
+
+          jf api "/apptrust/api/v1/applications/${APP_NAME}/versions?async=false" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-JFrog-Signing-Key-Name: ${LIFECYCLE_KEY_NAME}" \
+            --input "$RUNNER_TEMP/version-create.json"
 
       # ---------- 6. Tests ----------------------------------------------------
       - name: Set up Python

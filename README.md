@@ -106,7 +106,7 @@ Each arrow is enforced by JFrog. Each identity change is enforced by GitHub Envi
    gh auth login                              # once, for `gh secret set` in step 3
    ./04-setup-oidc.sh <your-github-org>/<your-repo>
    ```
-   Step 3 of `00-run-all.sh` (`03a-setup-signing-key.sh`) already generated an ed25519 keypair, registered the **public** half with the JFrog Evidence trust store, and pushed the **private** half to your GitHub repository as the `POC_EVD_SIGNING_KEY` secret via `gh secret set`. You never see or touch the key material. The OIDC script then creates three JFrog integrations and prints the GitHub Environment values you configure in the Web UI.
+   Step 3 of `00-run-all.sh` (`03a-setup-signing-key.sh`) already generated this project's two signing keys: an evidence keypair whose **public** half goes to the JFrog trust store and whose **private** half is pushed to your GitHub repository as the `POC_EVD_SIGNING_KEY` secret via `gh secret set`, plus a lifecycle key pair uploaded to Artifactory Keys Management so AppTrust signs the application version with a key this POC owns rather than the shared `default-lifecycle-key`. You never see or touch the key material. The OIDC script then creates three JFrog integrations and prints the GitHub Environment values you configure in the Web UI.
 5. **Push and watch:**
    ```bash
    git push
