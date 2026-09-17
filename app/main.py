@@ -47,7 +47,9 @@ class EchoOut(BaseModel):
     echoed: str
     served_by: str
 
-
+class EchoOutTest(BaseModel):
+    echoed: str
+    served_by: str
 
 @app.get("/health", response_model=Health)
 def health() -> Health:
