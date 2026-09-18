@@ -98,38 +98,35 @@ jobs:
           python --version; pip --version
           jf pip-config --repo-resolve "${PYPI_REMOTE}"
 
-          # --format=json produces a parseable report; there is no --fail flag.
-          # curation-audit exits non-zero when blocked packages are found, but
-          # we also parse the JSON to display exactly which packages were blocked
-          # and under which policy.
+          # --format=json produces a parseable report. There is no --fail flag
+          # and the command exits 0 even when packages are blocked, so the JSON
+          # report is the gate. Progress/summary lines go to stderr, so stdout
+          # must be captured separately to keep the report valid JSON.
           set +e
           jf curation-audit \
             --requirements-file=requirements.txt \
-            --format=json 2>&1 | tee /tmp/curation-audit.json
-          AUDIT_RC=${PIPESTATUS[0]}
+            --format=json > /tmp/curation-audit.json 2> /tmp/curation-audit.log
+          AUDIT_RC=$?
           set -e
+          cat /tmp/curation-audit.log
 
-          # Blocked packages appear as array items whose "blocked" array is
-          # non-empty, or whose "status" field equals "blocked".
-          BLOCKED=$(jq -r '
-            if type == "array" then
-              [ .[] | select(
-                  (.blocked // [] | length) > 0
-                  or .status == "blocked"
-                ) ] | length
-            elif type == "object" then
-              ((.blockedPackages // []) | length)
-            else 0 end
-          ' /tmp/curation-audit.json 2>/dev/null || echo "0")
+          # One JSON array of package records per audited project, each blocked
+          # record carrying "action": "blocked". `-s` slurps the concatenated
+          # arrays; `..` walks whatever nesting the report uses.
+          if ! BLOCKED=$(jq -s '[ .. | objects | select(.action == "blocked") ] | length' /tmp/curation-audit.json); then
+            echo "::error::Could not parse the curation audit report"
+            cat /tmp/curation-audit.json
+            exit 1
+          fi
 
           if [ "${BLOCKED:-0}" -gt 0 ]; then
             echo "::error::Curation policy blocked ${BLOCKED} package(s):"
-            jq -r '
-              if type == "array" then
-                .[] | select((.blocked // [] | length) > 0 or .status == "blocked") |
-                "  BLOCKED \(.name)@\(.version)  policy=\( [.blocked[]?.policyName // empty, .policies[]?.policy // empty] | first // "unknown" )"
-              else . end
-            ' /tmp/curation-audit.json 2>/dev/null || true
+            jq -s -r '
+              [ .. | objects | select(.action == "blocked") ][] |
+              "  BLOCKED \(.blocked_package_name)@\(.blocked_package_version)" +
+              "  reason=\(.blocking_reason // "unknown")" +
+              "  policies=\([ .policies[]?.policy ] | join(", "))"
+            ' /tmp/curation-audit.json
             exit 1
           fi
 
