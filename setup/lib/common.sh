@@ -332,6 +332,9 @@ repo_docker()     { prefix "docker-remote"; }
 # Stage-local repos — include technology so multi-tech expansion later
 # does not collide (e.g. adding python-dev-local next to docker-dev-local).
 repo_stage()      { prefix "docker-$1-local"; }        # <app>-docker-dev-local
+# AppTrust creates this generic local repo implicitly when the application is
+# created, and leaves it behind when the application is deleted.
+repo_app_entity() { prefix "application-entity"; }     # <app>-application-entity
 # Service identities used by CI (via OIDC). The `-svc` suffix marks these
 # as service accounts in Admin UIs.
 stage_user()      { prefix "$1-svc"; }                 # <app>-dev-svc
@@ -503,6 +506,34 @@ keypair_exists() {
 }
 project_exists() {
   [[ "$(api_status_code "/access/api/v1/projects/$1")" == "200" ]]
+}
+environment_exists() {
+  jf api "/access/api/v1/environments" -X GET 2>/dev/null \
+    | jq -e --arg n "$1" 'any(.[]; .name == $n)' >/dev/null 2>&1
+}
+
+# ---------- lifecycle environments -------------------------------------------
+# JFrog ships only DEV and PROD as built-in global environments. This POC's
+# lifecycle is DEV → QA → PROD, so QA must exist before anything references it:
+# repos are tagged with it at creation time, and the project-role API rejects
+# unknown environments with HTTP 400 ("Cannot set role environments that are
+# not part of the project").
+ensure_environment() {
+  local env_name="$1"
+  if environment_exists "$env_name"; then
+    ok "environment already exists: ${env_name}"
+    return
+  fi
+  # CLI-gap: no `jf` subcommand for environment CRUD; use the Access API.
+  local code
+  code="$(rt_api_status POST "/access/api/v1/environments" "{\"name\":\"${env_name}\"}")"
+  case "$code" in
+    20*|409) ok "created environment: ${env_name}" ;;
+    *) die "Cannot create global environment '${env_name}' (HTTP ${code}).
+    Create it manually in the JFrog UI under Administration → Lifecycle
+    (on Artifactory 7.125.3+ this screen is called Stages), then re-run.
+    The POC lifecycle is DEV → QA → PROD and QA is not a built-in environment." ;;
+  esac
 }
 unified_rule_exists() {
   local name="$1"

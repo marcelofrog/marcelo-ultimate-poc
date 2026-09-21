@@ -41,6 +41,7 @@ anything touches your JFrog tenant.
   - **AppTrust**
   - **Evidence Service**
 - Outbound internet access from Artifactory to pypi.org, registry.npmjs.org, and registry.hub.docker.com (the curated remotes will proxy these).
+- A global **QA** lifecycle environment. JFrog only ships `DEV` and `PROD`, and this POC promotes `DEV → QA → PROD`. `03-setup-apptrust.sh` creates `QA` for you; if your admin token cannot create environments, add it manually under Administration → Lifecycle (called Stages on Artifactory 7.125.3+) before running the setup.
 
 ## GitHub side
 

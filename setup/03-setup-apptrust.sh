@@ -35,6 +35,12 @@ else
   ok "created project: ${PROJECT}"
 fi
 
+# =========== 0b. Lifecycle environments ======================================
+log "Ensuring lifecycle environments exist"
+for stage_env in DEV QA PROD; do
+  ensure_environment "$stage_env"
+done
+
 # =========== 1. Stage repositories ===========================================
 create_local_docker() {
   local key="$1" stage="$2"
@@ -58,9 +64,11 @@ JSON
   rm -f "$tmp"
   # CLI-gap: jf rt repo-create template does not support array values.
   # Set environments via REST API after creation.
-  jf rt curl -sS -XPOST "api/repositories/${key}" \
+  local code
+  code="$(jf rt curl -sS -o /dev/null -w '%{http_code}' -XPOST "api/repositories/${key}" \
     -H "Content-Type: application/json" \
-    -d "{\"environments\":[\"${stage_upper}\"]}" >/dev/null
+    -d "{\"environments\":[\"${stage_upper}\"]}")"
+  [[ "$code" == "200" ]] || die "failed to tag repo ${key} with environment ${stage_upper} (HTTP ${code})"
   ok "created local docker repo: $key (environment: ${stage_upper})"
 }
 
@@ -76,9 +84,10 @@ log "Assigning stage repos to project '${PROJECT}'"
 for stage in dev qa prod; do
   repo="$(repo_stage "$stage")"
   stage_upper="$(echo "$stage" | tr '[:lower:]' '[:upper:]')"
-  jf rt curl -sS -X POST "api/repositories/${repo}" \
+  code="$(jf rt curl -sS -o /dev/null -w '%{http_code}' -X POST "api/repositories/${repo}" \
     -H "Content-Type: application/json" \
-    -d "{\"projectKey\":\"${PROJECT}\",\"environments\":[\"${stage_upper}\"]}" >/dev/null
+    -d "{\"projectKey\":\"${PROJECT}\",\"environments\":[\"${stage_upper}\"]}")"
+  [[ "$code" == "200" ]] || die "failed to assign repo ${repo} to project ${PROJECT} with env ${stage_upper} (HTTP ${code})"
   ok "repo ${repo} → project=${PROJECT}, env=${stage_upper}"
 done
 
@@ -150,8 +159,10 @@ log "Assigning stage groups to JFrog project '${PROJECT}'"
 assign_group_roles() {
   local group="$1"; shift
   local roles_json; roles_json="$(printf '"%s",' "$@" | sed 's/,$//')"
-  rt_api PUT "/access/api/v1/projects/${PROJECT}/groups/${group}" \
-    "{\"roles\":[${roles_json}]}" >/dev/null
+  local resp
+  resp="$(rt_api PUT "/access/api/v1/projects/${PROJECT}/groups/${group}" \
+    "{\"roles\":[${roles_json}]}" 2>/dev/null)" \
+    || die "failed to assign roles [$*] to group '${group}': ${resp}"
   ok "project group roles: ${group} → $*"
 }
 
@@ -162,8 +173,9 @@ PROMOTER_ROLE="apptrust-promoter"
 if rt_api GET "/access/api/v1/projects/${PROJECT}/roles/${PROMOTER_ROLE}" 2>/dev/null | jq -e '.name' >/dev/null 2>&1; then
   ok "custom role '${PROMOTER_ROLE}' already exists"
 else
-  rt_api POST "/access/api/v1/projects/${PROJECT}/roles" \
-    "{\"name\":\"${PROMOTER_ROLE}\",\"type\":\"CUSTOM\",\"description\":\"Promote AppTrust versions across all stages (DEV→QA→PROD)\",\"environments\":[\"DEV\",\"QA\",\"PROD\"],\"actions\":[\"READ_APPLICATION\",\"READ_APPLICATION_VERSION\",\"PROMOTE_APPLICATION_VERSION\"]}" >/dev/null
+  role_resp="$(rt_api POST "/access/api/v1/projects/${PROJECT}/roles" \
+    "{\"name\":\"${PROMOTER_ROLE}\",\"type\":\"CUSTOM\",\"description\":\"Promote AppTrust versions across all stages (DEV→QA→PROD)\",\"environments\":[\"DEV\",\"QA\",\"PROD\"],\"actions\":[\"READ_APPLICATION\",\"READ_APPLICATION_VERSION\",\"PROMOTE_APPLICATION_VERSION\"]}" 2>/dev/null)" \
+    || die "failed to create custom role '${PROMOTER_ROLE}': ${role_resp}"
   ok "created custom role '${PROMOTER_ROLE}' (DEV+QA+PROD, PROMOTE_APPLICATION_VERSION)"
 fi
 

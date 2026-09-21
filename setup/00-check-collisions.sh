@@ -43,6 +43,7 @@ CHECKLIST=(
   "repo (local)|$(repo_stage dev)|repo_exists"
   "repo (local)|$(repo_stage qa)|repo_exists"
   "repo (local)|$(repo_stage prod)|repo_exists"
+  "repo (local)|$(repo_app_entity)|repo_exists"
 
   # Groups
   "group|$(group_stage dev)|group_exists"
@@ -60,6 +61,7 @@ CHECKLIST=(
   "permission|$(perm_target qa   writer)|permission_exists"
   "permission|$(perm_target prod promoter)|permission_exists"
   "permission|$(perm_target prod writer)|permission_exists"
+  "permission|$(prefix dev-build-info)|permission_exists"
 
   # JFrog project
   "project|${POC_PROJECT_KEY}|project_exists"
@@ -68,6 +70,7 @@ CHECKLIST=(
   "apptrust app|${APP}|apptrust_application_exists"
   "policy|$(prefix dev-exit-gate)|unified_policy_exists"
   "policy|$(prefix qa-exit-gate)|unified_policy_exists"
+  "policy|$(prefix prod-release-gate)|unified_policy_exists"
   "rule|$(prefix security-rule)|unified_rule_exists"
   "rule|$(prefix evidence-rule)|unified_rule_exists"
 

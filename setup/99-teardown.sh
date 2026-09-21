@@ -11,7 +11,11 @@
 #         →   permission targets   →   OIDC integrations
 #         →   curation policies    →   repositories (local, then remote)
 #         →   users                →   groups
-#         →   signing keys (evidence trusted key + lifecycle key pair)
+#         →   JFrog project        →   signing keys (evidence trusted key
+#                                      + lifecycle key pair)
+#
+# The project goes last because Access refuses to delete a project while any
+# repository, user, or group is still assigned to it.
 #
 # Flags:
 #   --dry-run              print the plan, don't call any DELETE.
@@ -162,8 +166,9 @@ fi
 
 # ---------- 2. Unified policy gates (policies then rules) --------------------
 log "Removing promotion gate policies"
-do_delete "policy" "$(prefix dev-exit-gate)" unified_policy_exists _del_unified_policy "$(prefix dev-exit-gate)"
-do_delete "policy" "$(prefix qa-exit-gate)"  unified_policy_exists _del_unified_policy "$(prefix qa-exit-gate)"
+do_delete "policy" "$(prefix dev-exit-gate)"      unified_policy_exists _del_unified_policy "$(prefix dev-exit-gate)"
+do_delete "policy" "$(prefix qa-exit-gate)"       unified_policy_exists _del_unified_policy "$(prefix qa-exit-gate)"
+do_delete "policy" "$(prefix prod-release-gate)"  unified_policy_exists _del_unified_policy "$(prefix prod-release-gate)"
 
 log "Removing promotion gate rules"
 do_delete "rule" "$(prefix security-rule)" unified_rule_exists _del_unified_rule "$(prefix security-rule)"
@@ -180,7 +185,8 @@ for pt in \
     "$(perm_target qa   promoter)" \
     "$(perm_target qa   writer)" \
     "$(perm_target prod promoter)" \
-    "$(perm_target prod writer)"; do
+    "$(perm_target prod writer)" \
+    "$(prefix dev-build-info)"; do
   do_delete "permission" "$pt" permission_exists _del_perm "$pt"
 done
 
@@ -189,13 +195,6 @@ log "Removing OIDC integrations"
 for i in "$(oidc_int dev)" "$(oidc_int qa)" "$(oidc_int prod)"; do
   do_delete "oidc integration" "$i" oidc_integration_exists _del_oidc "$i"
 done
-
-# ---------- 5b. JFrog project ------------------------------------------------
-log "Removing JFrog project"
-_del_project() {
-  jf api "/access/api/v1/projects/$1" -X DELETE 2>/dev/null
-}
-do_delete "project" "${POC_PROJECT_KEY}" project_exists _del_project "${POC_PROJECT_KEY}"
 
 # ---------- 6. Curation policies ---------------------------------------------
 log "Removing Curation blocking policies"
@@ -227,7 +226,7 @@ fi
 # Locals first (they reference remotes indirectly through virtuals/pipelines),
 # then remotes.
 log "Removing local stage repositories"
-for r in "$(repo_stage dev)" "$(repo_stage qa)" "$(repo_stage prod)"; do
+for r in "$(repo_stage dev)" "$(repo_stage qa)" "$(repo_stage prod)" "$(repo_app_entity)"; do
   do_delete "repo (local)" "$r" repo_exists _del_repo "$r"
 done
 
@@ -246,6 +245,16 @@ log "Removing groups"
 for g in "$(group_stage dev)" "$(group_stage qa)" "$(group_stage prod)"; do
   do_delete "group" "$g" group_exists _del_group "$g"
 done
+
+# ---------- 8b. JFrog project ------------------------------------------------
+# Must run after repos, users and groups: Access rejects the delete while any
+# resource is still assigned to the project. The project-scoped custom role
+# 'apptrust-promoter' is removed with the project.
+log "Removing JFrog project"
+_del_project() {
+  jf api "/access/api/v1/projects/$1" -X DELETE 2>/dev/null
+}
+do_delete "project" "${POC_PROJECT_KEY}" project_exists _del_project "${POC_PROJECT_KEY}"
 
 # ---------- 9. Signing keys --------------------------------------------------
 log "Removing signing keys"
