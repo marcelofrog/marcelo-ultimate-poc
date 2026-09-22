@@ -46,6 +46,9 @@ jobs:
       DEV_REPO:            ${{ vars.POC_APP_NAME }}-docker-dev-local
       PYPI_REMOTE:         ${{ vars.POC_APP_NAME }}-pypi-remote
       DOCKER_REMOTE:       ${{ vars.POC_APP_NAME }}-docker-remote
+      # Keep jf stdout as JSON/payload only. Info/Warn timestamps on stdout
+      # make `jq` fail ("Invalid numeric literal") on curation-audit --format=json.
+      JFROG_CLI_LOG_LEVEL: ERROR
 
     steps:
       - name: Check out source
@@ -100,8 +103,8 @@ jobs:
 
           # --format=json produces a parseable report. There is no --fail flag
           # and the command exits 0 even when packages are blocked, so the JSON
-          # report is the gate. Progress/summary lines go to stderr, so stdout
-          # must be captured separately to keep the report valid JSON.
+          # report is the gate. JFROG_CLI_LOG_LEVEL=ERROR keeps Info/Warn off
+          # stdout so this capture stays valid JSON.
           set +e
           jf curation-audit \
             --requirements-file=requirements.txt \
