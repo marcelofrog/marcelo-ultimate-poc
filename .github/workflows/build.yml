@@ -111,7 +111,7 @@ jobs:
             --format=json 1> /tmp/curation-audit.json
           AUDIT_RC=$?
           set -e
-          cat /tmp/curation-audit.log
+          cat /tmp/curation-audit.json
 
           # Drop CLI chatter that may precede the JSON array. Match a line that
           # *starts* with `[` so timestamps like `18:28:16 [Info]` are not kept.
