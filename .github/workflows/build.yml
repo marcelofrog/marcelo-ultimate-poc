@@ -108,10 +108,15 @@ jobs:
           set +e
           jf curation-audit \
             --requirements-file=requirements.txt \
-            --format=json > /tmp/curation-audit.json 2> /tmp/curation-audit.log
+            --format=json 1> /tmp/curation-audit.json
           AUDIT_RC=$?
           set -e
           cat /tmp/curation-audit.log
+
+          # Drop CLI chatter that may precede the JSON array. Match a line that
+          # *starts* with `[` so timestamps like `18:28:16 [Info]` are not kept.
+          awk '/^[[:space:]]*\[/ {p=1} p' /tmp/curation-audit.json > /tmp/curation-audit.trimmed.json
+          mv /tmp/curation-audit.trimmed.json /tmp/curation-audit.json
 
           # One JSON array of package records per audited project, each blocked
           # record carrying "action": "blocked". `-s` slurps the concatenated
