@@ -344,6 +344,14 @@ perm_target()     { prefix "$1-$2"; }                  # <app>-dev-writer
 policy_id()       { prefix "$1"; }
 # OIDC integrations — spell out `github` so the Admin UI is unambiguous.
 oidc_int()        { prefix "github-$1"; }              # <app>-github-dev
+# JFrog lifecycle stages (environments). Named {project_key}-{STAGE} so they
+# do not collide with the platform-global DEV/PROD stages. Stage suffix is
+# uppercase (DEV/QA/PROD) to match JFrog's environment-name convention.
+lifecycle_stage() {
+  local upper
+  upper="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
+  echo "${POC_PROJECT_KEY}-${upper}"
+}
 
 # ---------- name validation --------------------------------------------------
 # Application-name rules (also govern the AppTrust application key and every
@@ -508,31 +516,53 @@ project_exists() {
   [[ "$(api_status_code "/access/api/v1/projects/$1")" == "200" ]]
 }
 environment_exists() {
-  jf api "/access/api/v1/environments" -X GET 2>/dev/null \
+  jf api "/access/api/v1/projects/${POC_PROJECT_KEY}/environments" -X GET 2>/dev/null \
     | jq -e --arg n "$1" 'any(.[]; .name == $n)' >/dev/null 2>&1
 }
 
 # ---------- lifecycle environments -------------------------------------------
-# JFrog ships only DEV and PROD as built-in global environments. This POC's
-# lifecycle is DEV → QA → PROD, so QA must exist before anything references it:
-# repos are tagged with it at creation time, and the project-role API rejects
-# unknown environments with HTTP 400 ("Cannot set role environments that are
-# not part of the project").
+# Stages are named {project_key}-{STAGE} (see lifecycle_stage). They are
+# project environments (not platform-global) and must exist before repos or
+# project roles reference them: the project-role API rejects unknown
+# environments with HTTP 400 ("Cannot set role environments that are not
+# part of the project").
 ensure_environment() {
   local env_name="$1"
   if environment_exists "$env_name"; then
     ok "environment already exists: ${env_name}"
     return
   fi
-  # CLI-gap: no `jf` subcommand for environment CRUD; use the Access API.
+  # CLI-gap: no `jf` subcommand for environment CRUD; use Create Project Environment.
+  # https://docs.jfrog.com/administration/reference/createprojectenvironment-1
   local code
-  code="$(rt_api_status POST "/access/api/v1/environments" "{\"name\":\"${env_name}\"}")"
+  code="$(rt_api_status POST "/access/api/v1/projects/${POC_PROJECT_KEY}/environments" "{\"name\":\"${env_name}\"}")"
   case "$code" in
     20*|409) ok "created environment: ${env_name}" ;;
-    *) die "Cannot create global environment '${env_name}' (HTTP ${code}).
-    Create it manually in the JFrog UI under Administration → Lifecycle
-    (on Artifactory 7.125.3+ this screen is called Stages), then re-run.
-    The POC lifecycle is DEV → QA → PROD and QA is not a built-in environment." ;;
+    *) die "Cannot create lifecycle stage '${env_name}' on project '${POC_PROJECT_KEY}' (HTTP ${code}).
+    Create it manually in the JFrog UI under the project (${POC_PROJECT_KEY}) → Environments,
+    then re-run. This POC uses project-prefixed stages: $(lifecycle_stage dev) → $(lifecycle_stage qa) → $(lifecycle_stage prod)." ;;
+  esac
+}
+
+# Register the three project environments as the project's promotion lifecycle.
+# Creating an environment only makes the stage exist; until it is listed in the
+# project lifecycle, AppTrust and the unified-policy API reject it with
+# "Selected stage is not available for projects: {project}" (HTTP 400).
+# The release stage stays the platform-global PROD — project stages cannot be
+# release-category, so this call sends promote stages only.
+ensure_project_lifecycle() {
+  local stages_json
+  stages_json="$(printf '"%s",' "$(lifecycle_stage dev)" "$(lifecycle_stage qa)" "$(lifecycle_stage prod)")"
+  stages_json="[${stages_json%,}]"
+  # CLI-gap: no `jf` subcommand for lifecycle CRUD; use the Access stages API.
+  local code
+  code="$(rt_api_status PATCH "/access/api/v2/lifecycle?project_key=${POC_PROJECT_KEY}" \
+    "{\"promote_stages\":${stages_json}}")"
+  case "$code" in
+    20*) ok "project lifecycle: $(lifecycle_stage dev) → $(lifecycle_stage qa) → $(lifecycle_stage prod)" ;;
+    *) die "Cannot set the promotion lifecycle for project '${POC_PROJECT_KEY}' (HTTP ${code}).
+    Requires Artifactory 7.125.4+. Set it manually under Administration → Lifecycle
+    for project ${POC_PROJECT_KEY}, ordering the stages $(lifecycle_stage dev) → $(lifecycle_stage qa) → $(lifecycle_stage prod), then re-run." ;;
   esac
 }
 unified_rule_exists() {

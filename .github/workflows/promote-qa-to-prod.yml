@@ -30,6 +30,7 @@ jobs:
     environment: prod   # ← required-reviewer approval enforced here
     env:
       APP_NAME:         ${{ vars.POC_APP_NAME }}
+      PROJECT_KEY:      ${{ vars.POC_PROJECT_KEY }}
       JF_URL:           ${{ vars.JF_URL }}
       JF_OIDC_PROVIDER: ${{ vars.JF_OIDC_PROVIDER }}    # prod-scoped OIDC integration
       EVD_KEY_ALIAS:    ${{ vars.POC_EVD_KEY_ALIAS }}
@@ -59,20 +60,20 @@ jobs:
       - name: Show current identity
         run: |
           jf rt curl -sS api/system/ping
-          echo "Attempting qa -> prod promotion for ${APP_NAME}@${{ inputs.app_version }}"
+          echo "Attempting ${PROJECT_KEY}-QA -> ${PROJECT_KEY}-PROD promotion for ${APP_NAME}@${{ inputs.app_version }}"
 
       - name: Promote application version to prod
         run: |
           set +e
-          output=$(jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" PROD 2>&1)
+          output=$(jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" "${PROJECT_KEY}-PROD" 2>&1)
           exit_code=$?
           echo "${output}"
           if [ $exit_code -ne 0 ]; then
             reason=$(echo "${output}" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
             [ -z "${reason}" ] && reason="${output}"
-            echo "::error::Promotion QA→PROD failed: ${reason}"
+            echo "::error::Promotion ${PROJECT_KEY}-QA→${PROJECT_KEY}-PROD failed: ${reason}"
             {
-              echo "## Promotion QA→PROD Failed"
+              echo "## Promotion ${PROJECT_KEY}-QA→${PROJECT_KEY}-PROD Failed"
               echo "**Version:** ${{ inputs.app_version }}"
               echo "**Reason:** ${reason}"
             } >> "$GITHUB_STEP_SUMMARY"
@@ -84,8 +85,8 @@ jobs:
           cat > /tmp/promotion.predicate.json <<JSON
           {
             "event":       "promotion",
-            "source_stage":"qa",
-            "target_stage":"prod",
+            "source_stage":"${PROJECT_KEY}-QA",
+            "target_stage":"${PROJECT_KEY}-PROD",
             "application": "${APP_NAME}",
             "version":     "${{ inputs.app_version }}",
             "actor":       "${{ github.actor }}",

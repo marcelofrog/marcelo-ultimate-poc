@@ -23,6 +23,9 @@ APP="$POC_APP_NAME"
 PROJECT="$POC_PROJECT_KEY"
 CVE_THRESHOLD="${POC_CVE_BLOCK_THRESHOLD:-9.0}"
 MIN_TESTS="${POC_MIN_PASSING_TESTS:-3}"
+STAGE_DEV="$(lifecycle_stage dev)"
+STAGE_QA="$(lifecycle_stage qa)"
+STAGE_PROD="$(lifecycle_stage prod)"
 
 # =========== 0. JFrog Project =================================================
 log "Ensuring JFrog project '${PROJECT}' exists"
@@ -37,9 +40,10 @@ fi
 
 # =========== 0b. Lifecycle environments ======================================
 log "Ensuring lifecycle environments exist"
-for stage_env in DEV QA PROD; do
-  ensure_environment "$stage_env"
+for stage in dev qa prod; do
+  ensure_environment "$(lifecycle_stage "$stage")"
 done
+ensure_project_lifecycle
 
 # =========== 1. Stage repositories ===========================================
 create_local_docker() {
@@ -48,7 +52,6 @@ create_local_docker() {
     ok "local docker repo already exists: $key"
     return
   fi
-  local stage_upper; stage_upper="$(echo "$stage" | tr '[:lower:]' '[:upper:]')"
   local tmp; tmp="$(mktemp)"
   cat > "$tmp" <<JSON
 {
@@ -62,14 +65,11 @@ create_local_docker() {
 JSON
   jf_admin rt repo-create "$tmp"
   rm -f "$tmp"
-  # CLI-gap: jf rt repo-create template does not support array values.
-  # Set environments via REST API after creation.
-  local code
-  code="$(jf rt curl -sS -o /dev/null -w '%{http_code}' -XPOST "api/repositories/${key}" \
-    -H "Content-Type: application/json" \
-    -d "{\"environments\":[\"${stage_upper}\"]}")"
-  [[ "$code" == "200" ]] || die "failed to tag repo ${key} with environment ${stage_upper} (HTTP ${code})"
-  ok "created local docker repo: $key (environment: ${stage_upper})"
+  # The stage environment is NOT set here: {project}-DEV/QA/PROD are project
+  # environments, and Artifactory rejects (HTTP 400) an environment the repo's
+  # project does not own. The assignment loop below sets projectKey and
+  # environments together.
+  ok "created local docker repo: $key (stage ${stage}, env applied at project assignment)"
 }
 
 log "Creating stage-scoped local docker repositories"
@@ -77,18 +77,20 @@ create_local_docker "$(repo_stage dev)"  dev
 create_local_docker "$(repo_stage qa)"   qa
 create_local_docker "$(repo_stage prod)" prod
 
-# Assign repos to the JFrog project and (re-)apply the correct environment tag.
-# The project assignment via POST api/repositories resets the environment array
-# to ["DEV"], so the tag must be explicitly set afterwards.
+# Assign repos to the JFrog project and apply the stage environment in the SAME
+# call. Order matters: the stages are project environments, so a repo can only
+# carry {project}-DEV/QA/PROD once it belongs to that project — tagging first
+# fails with HTTP 400. Sending projectKey + environments together satisfies both.
+# Runs for every stage repo, including ones that already existed.
 log "Assigning stage repos to project '${PROJECT}'"
 for stage in dev qa prod; do
   repo="$(repo_stage "$stage")"
-  stage_upper="$(echo "$stage" | tr '[:lower:]' '[:upper:]')"
+  stage_env="$(lifecycle_stage "$stage")"
   code="$(jf rt curl -sS -o /dev/null -w '%{http_code}' -X POST "api/repositories/${repo}" \
     -H "Content-Type: application/json" \
-    -d "{\"projectKey\":\"${PROJECT}\",\"environments\":[\"${stage_upper}\"]}")"
-  [[ "$code" == "200" ]] || die "failed to assign repo ${repo} to project ${PROJECT} with env ${stage_upper} (HTTP ${code})"
-  ok "repo ${repo} → project=${PROJECT}, env=${stage_upper}"
+    -d "{\"projectKey\":\"${PROJECT}\",\"environments\":[\"${stage_env}\"]}")"
+  [[ "$code" == "200" ]] || die "failed to assign repo ${repo} to project ${PROJECT} with env ${stage_env} (HTTP ${code})"
+  ok "repo ${repo} → project=${PROJECT}, env=${stage_env}"
 done
 
 # =========== 2. AppTrust application =========================================
@@ -166,17 +168,18 @@ assign_group_roles() {
   ok "project group roles: ${group} → $*"
 }
 
-# Custom role: AppTrust Manager predefined role only covers DEV+PROD environments.
-# Promoting to QA requires a role whose environment scope includes QA.
+# Custom role: AppTrust Manager predefined role only covers the project's
+# default DEV+PROD stages. Promoting to QA requires a role whose environment
+# scope includes the project-prefixed QA stage.
 # CUSTOM type roles can cover all three; CUSTOM_GLOBAL is rejected by this API.
 PROMOTER_ROLE="apptrust-promoter"
 if rt_api GET "/access/api/v1/projects/${PROJECT}/roles/${PROMOTER_ROLE}" 2>/dev/null | jq -e '.name' >/dev/null 2>&1; then
   ok "custom role '${PROMOTER_ROLE}' already exists"
 else
   role_resp="$(rt_api POST "/access/api/v1/projects/${PROJECT}/roles" \
-    "{\"name\":\"${PROMOTER_ROLE}\",\"type\":\"CUSTOM\",\"description\":\"Promote AppTrust versions across all stages (DEV→QA→PROD)\",\"environments\":[\"DEV\",\"QA\",\"PROD\"],\"actions\":[\"READ_APPLICATION\",\"READ_APPLICATION_VERSION\",\"PROMOTE_APPLICATION_VERSION\"]}" 2>/dev/null)" \
+    "{\"name\":\"${PROMOTER_ROLE}\",\"type\":\"CUSTOM\",\"description\":\"Promote AppTrust versions across all stages (${STAGE_DEV}→${STAGE_QA}→${STAGE_PROD})\",\"environments\":[\"${STAGE_DEV}\",\"${STAGE_QA}\",\"${STAGE_PROD}\"],\"actions\":[\"READ_APPLICATION\",\"READ_APPLICATION_VERSION\",\"PROMOTE_APPLICATION_VERSION\"]}" 2>/dev/null)" \
     || die "failed to create custom role '${PROMOTER_ROLE}': ${role_resp}"
-  ok "created custom role '${PROMOTER_ROLE}' (DEV+QA+PROD, PROMOTE_APPLICATION_VERSION)"
+  ok "created custom role '${PROMOTER_ROLE}' (${STAGE_DEV}+${STAGE_QA}+${STAGE_PROD}, PROMOTE_APPLICATION_VERSION)"
 fi
 
 # Developer: CREATE_APPLICATION_VERSION + DEPLOY_BUILD (needed for build.yml).
@@ -189,11 +192,16 @@ assign_group_roles "$(group_stage prod)" "Contributor" "AppTrust Manager" "${PRO
 
 # =========== 4. Promotion gates (Unified Policy API) =========================
 # CLI-gap: `jf apptrust` has no gate-management subcommand; use the unified
-# policy REST API at /unifiedpolicy/api/v1. Stage keys must be uppercase.
+# policy REST API at /unifiedpolicy/api/v1. Stage keys are {project}-{STAGE}.
 #
-# Two gates are created on the application lifecycle:
-#   DEV exit  — security: block if applicable CVE score >= CVE_THRESHOLD
-#   QA  exit  — evidence: block if no test-results evidence is attached
+# Three gates are created on the application lifecycle:
+#   {project}-DEV  exit  — security: block if applicable CVE score >= CVE_THRESHOLD
+#   {project}-QA   exit  — evidence: block if no test-results evidence is attached
+#   {project}-PROD entry — block unless the QA exit gate was certified
+#
+# The stages must already be part of the project lifecycle (ensure_project_lifecycle
+# above), otherwise every policy here fails with HTTP 400 "Selected stage is not
+# available for projects: {project}".
 log "Creating promotion gates (unified policy API) for application ${APP}"
 
 security_rule_name="$(prefix security-rule)"
@@ -231,47 +239,56 @@ else
   ok "evidence rule created (${evidence_rule_name}, id=${EVIDENCE_RULE_ID})"
 fi
 
+# create_policy NAME JSON — POST the policy and surface the API error body on
+# failure. Without this the response is swallowed and `set -e` aborts the run
+# with no explanation (e.g. "Selected stage is not available for projects").
+create_policy() {
+  local name="$1" payload="$2" resp
+  if ! resp="$(rt_api POST "/unifiedpolicy/api/v1/policies" "$payload" 2>/dev/null)"; then
+    die "failed to create gate policy '${name}': ${resp}"
+  fi
+}
+
 # --- 4c. DEV exit gate policy: security rule ---------------------------------
 if unified_policy_exists "$dev_exit_policy_name"; then
-  ok "DEV exit gate policy already exists (${dev_exit_policy_name})"
+  ok "${STAGE_DEV} exit gate policy already exists (${dev_exit_policy_name})"
 else
-  log "creating DEV exit gate policy (CVE >= ${CVE_THRESHOLD})"
-  rt_api POST "/unifiedpolicy/api/v1/policies" \
-    "{\"name\":\"${dev_exit_policy_name}\",\"description\":\"Block DEV→QA promotion if applicable CVE >= ${CVE_THRESHOLD}\",\"mode\":\"block\",\"enabled\":true,\"rule_ids\":[\"${SECURITY_RULE_ID}\"],\"scope\":{\"type\":\"application\",\"application_keys\":[\"${APP}\"]},\"action\":{\"type\":\"certify_to_gate\",\"stage\":{\"key\":\"DEV\",\"gate\":\"exit\"}}}" \
-    >/dev/null 2>&1
-  ok "DEV exit gate policy created (${dev_exit_policy_name})"
+  log "creating ${STAGE_DEV} exit gate policy (CVE >= ${CVE_THRESHOLD})"
+  create_policy "$dev_exit_policy_name" \
+    "{\"name\":\"${dev_exit_policy_name}\",\"description\":\"Block ${STAGE_DEV}→${STAGE_QA} promotion if applicable CVE >= ${CVE_THRESHOLD}\",\"mode\":\"block\",\"enabled\":true,\"rule_ids\":[\"${SECURITY_RULE_ID}\"],\"scope\":{\"type\":\"application\",\"application_keys\":[\"${APP}\"]},\"action\":{\"type\":\"certify_to_gate\",\"stage\":{\"key\":\"${STAGE_DEV}\",\"gate\":\"exit\"}}}"
+  ok "${STAGE_DEV} exit gate policy created (${dev_exit_policy_name})"
 fi
 
 # --- 4d. QA exit gate policy: evidence rule ----------------------------------
 if unified_policy_exists "$qa_exit_policy_name"; then
-  ok "QA exit gate policy already exists (${qa_exit_policy_name})"
+  ok "${STAGE_QA} exit gate policy already exists (${qa_exit_policy_name})"
 else
-  log "creating QA exit gate policy (test-results evidence required)"
-  rt_api POST "/unifiedpolicy/api/v1/policies" \
-    "{\"name\":\"${qa_exit_policy_name}\",\"description\":\"Block QA→PROD promotion unless test-results evidence is attached\",\"mode\":\"block\",\"enabled\":true,\"rule_ids\":[\"${EVIDENCE_RULE_ID}\"],\"scope\":{\"type\":\"application\",\"application_keys\":[\"${APP}\"]},\"action\":{\"type\":\"certify_to_gate\",\"stage\":{\"key\":\"QA\",\"gate\":\"exit\"}}}" \
-    >/dev/null 2>&1
-  ok "QA exit gate policy created (${qa_exit_policy_name})"
+  log "creating ${STAGE_QA} exit gate policy (test-results evidence required)"
+  create_policy "$qa_exit_policy_name" \
+    "{\"name\":\"${qa_exit_policy_name}\",\"description\":\"Block ${STAGE_QA}→${STAGE_PROD} promotion unless test-results evidence is attached\",\"mode\":\"block\",\"enabled\":true,\"rule_ids\":[\"${EVIDENCE_RULE_ID}\"],\"scope\":{\"type\":\"application\",\"application_keys\":[\"${APP}\"]},\"action\":{\"type\":\"certify_to_gate\",\"stage\":{\"key\":\"${STAGE_QA}\",\"gate\":\"exit\"}}}"
+  ok "${STAGE_QA} exit gate policy created (${qa_exit_policy_name})"
 fi
 
-# --- 4e. PROD release gate: requires QA exit certification -------------------
+# --- 4e. PROD entry gate: requires QA exit certification ---------------------
 # Uses the predefined system rule "QA.Exit AppTrust Gate Certification exist"
-# (rule id 2027, template 1008) — blocks release unless QA exit was certified.
-# gate="release" is the AppTrust gate type that appears in the UI as "Release Gate".
+# (rule id 2027, template 1008) — blocks entry into prod unless QA exit was
+# certified. gate="entry" rather than "release": only the platform-global PROD
+# stage is release-category, project stages are always promote-category, and
+# promote-qa-to-prod.yml reaches prod through version-promote (an entry event).
 if unified_policy_exists "$prod_release_policy_name"; then
-  ok "PROD release gate policy already exists (${prod_release_policy_name})"
+  ok "${STAGE_PROD} entry gate policy already exists (${prod_release_policy_name})"
 else
-  log "creating PROD release gate policy (QA exit certification required)"
-  rt_api POST "/unifiedpolicy/api/v1/policies" \
-    "{\"name\":\"${prod_release_policy_name}\",\"description\":\"Block release to PROD unless QA exit gate was certified\",\"mode\":\"block\",\"enabled\":true,\"rule_ids\":[\"${QA_EXIT_CERT_RULE_ID}\"],\"scope\":{\"type\":\"application\",\"application_keys\":[\"${APP}\"]},\"action\":{\"type\":\"certify_to_gate\",\"stage\":{\"key\":\"PROD\",\"gate\":\"release\"}}}" \
-    >/dev/null 2>&1
-  ok "PROD release gate policy created (${prod_release_policy_name})"
+  log "creating ${STAGE_PROD} entry gate policy (${STAGE_QA} exit certification required)"
+  create_policy "$prod_release_policy_name" \
+    "{\"name\":\"${prod_release_policy_name}\",\"description\":\"Block promotion to ${STAGE_PROD} unless ${STAGE_QA} exit gate was certified\",\"mode\":\"block\",\"enabled\":true,\"rule_ids\":[\"${QA_EXIT_CERT_RULE_ID}\"],\"scope\":{\"type\":\"application\",\"application_keys\":[\"${APP}\"]},\"action\":{\"type\":\"certify_to_gate\",\"stage\":{\"key\":\"${STAGE_PROD}\",\"gate\":\"entry\"}}}"
+  ok "${STAGE_PROD} entry gate policy created (${prod_release_policy_name})"
 fi
 
 ok "AppTrust setup complete."
 echo
 echo "Application key : ${APP}"
-echo "Lifecycle       : DEV → QA → PROD"
+echo "Lifecycle       : ${STAGE_DEV} → ${STAGE_QA} → ${STAGE_PROD}"
 echo "Repositories    : $(repo_stage dev), $(repo_stage qa), $(repo_stage prod)"
-echo "Gates           : ${dev_exit_policy_name} (DEV exit), ${qa_exit_policy_name} (QA exit), ${prod_release_policy_name} (PROD release)"
+echo "Gates           : ${dev_exit_policy_name} (${STAGE_DEV} exit), ${qa_exit_policy_name} (${STAGE_QA} exit), ${prod_release_policy_name} (${STAGE_PROD} entry)"
 echo
 echo "Next: run ./04-setup-oidc.sh <owner/repo>"

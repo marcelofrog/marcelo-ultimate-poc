@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bash 
 # -----------------------------------------------------------------------------
 # 99-teardown.sh   [--dry-run] [--yes] [--purge-builds] [--purge-local-keys]
 #                  [--purge-github-secret]
@@ -11,11 +11,14 @@
 #         →   permission targets   →   OIDC integrations
 #         →   curation policies    →   repositories (local, then remote)
 #         →   users                →   groups
-#         →   JFrog project        →   signing keys (evidence trusted key
-#                                      + lifecycle key pair)
+#         →   signing keys (evidence trusted key + lifecycle key pair)
+#         →   JFrog project
+#         →   lifecycle stages ({project}-DEV/QA/PROD) (last)
 #
-# The project goes last because Access refuses to delete a project while any
-# repository, user, or group is still assigned to it.
+# The project is deleted after repos, users, and groups because Access
+# refuses to delete a project while any of those is still assigned to it.
+# Lifecycle stages are project environments: the project delete takes them
+# with it, and the explicit pass afterwards only catches a partial setup.
 #
 # Flags:
 #   --dry-run              print the plan, don't call any DELETE.
@@ -132,6 +135,12 @@ _del_unified_rule() {
   [[ -n "$id" ]] || return 1
   rt_api DELETE "/unifiedpolicy/api/v1/rules/${id}" >/dev/null
 }
+_del_project() {
+  jf api "/access/api/v1/projects/$1" -X DELETE 2>/dev/null
+}
+_del_environment() {
+  jf api "/access/api/v1/projects/${POC_PROJECT_KEY}/environments/$1" -X DELETE 2>/dev/null
+}
 
 # ---------- 1. Application versions (must go before the app) ----------------
 log "Removing AppTrust application versions"
@@ -246,16 +255,6 @@ for g in "$(group_stage dev)" "$(group_stage qa)" "$(group_stage prod)"; do
   do_delete "group" "$g" group_exists _del_group "$g"
 done
 
-# ---------- 8b. JFrog project ------------------------------------------------
-# Must run after repos, users and groups: Access rejects the delete while any
-# resource is still assigned to the project. The project-scoped custom role
-# 'apptrust-promoter' is removed with the project.
-log "Removing JFrog project"
-_del_project() {
-  jf api "/access/api/v1/projects/$1" -X DELETE 2>/dev/null
-}
-do_delete "project" "${POC_PROJECT_KEY}" project_exists _del_project "${POC_PROJECT_KEY}"
-
 # ---------- 9. Signing keys --------------------------------------------------
 log "Removing signing keys"
 do_delete "evidence key" "${APP}-evd-key" evidence_key_exists _del_evd_key "${APP}-evd-key"
@@ -315,6 +314,44 @@ if (( PURGE_GH_SECRET == 1 )); then
     fi
   fi
 fi
+
+# ---------- 13. JFrog project ------------------------------------------------
+# Must run after repos, users and groups: Access rejects the delete while any
+# resource is still assigned to the project. The project-scoped custom role
+# 'apptrust-promoter' is removed with the project.
+#
+# Record which stages are still live first: they hang off the project, so once
+# it is gone /projects/{key}/environments answers 404 for every name and
+# section 14 can no longer tell "removed with the project" from "never there".
+stages_live=()
+for s in "$(lifecycle_stage dev)" "$(lifecycle_stage qa)" "$(lifecycle_stage prod)"; do
+  if environment_exists "$s" 2>/dev/null; then
+    stages_live+=("$s")
+  fi
+done
+
+log "Removing JFrog project"
+do_delete "project" "${POC_PROJECT_KEY}" project_exists _del_project "${POC_PROJECT_KEY}"
+
+# ---------- 14. Lifecycle stages ---------------------------------------------
+# Project environments ({project}-DEV/QA/PROD). The project delete above
+# normally takes them with it, so the usual outcome here is "deleted (with
+# project)" reported from the snapshot. The explicit DELETE only runs when the
+# project outlived this step (partial setup, or a dry run). It cannot run
+# earlier: Access returns 409 ("still referenced by non-admin roles") while the
+# project's apptrust-promoter role still scopes these stages.
+log "Removing lifecycle stages"
+for s in "$(lifecycle_stage dev)" "$(lifecycle_stage qa)" "$(lifecycle_stage prod)"; do
+  if project_exists "${POC_PROJECT_KEY}"; then
+    do_delete "lifecycle stage" "$s" environment_exists _del_environment "$s"
+  elif [[ " ${stages_live[*]-} " == *" $s "* ]]; then
+    printf "  %-18s  %-45s  ${C_GREEN}deleted (with project)${C_RESET}\n" "lifecycle stage" "$s"
+    deleted=$((deleted + 1))
+  else
+    printf "  %-18s  %-45s  ${C_YELLOW}absent${C_RESET}\n" "lifecycle stage" "$s"
+    absent=$((absent + 1))
+  fi
+done
 
 # ---------- summary ----------------------------------------------------------
 echo

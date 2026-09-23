@@ -34,6 +34,7 @@ jobs:
     environment: qa   # ← RBAC boundary. Approval prompt fires here.
     env:
       APP_NAME:         ${{ vars.POC_APP_NAME }}
+      PROJECT_KEY:      ${{ vars.POC_PROJECT_KEY }}
       JF_URL:           ${{ vars.JF_URL }}
       JF_OIDC_PROVIDER: ${{ vars.JF_OIDC_PROVIDER }}    # qa-scoped OIDC integration
       EVD_KEY_ALIAS:    ${{ vars.POC_EVD_KEY_ALIAS }}
@@ -63,22 +64,22 @@ jobs:
       - name: Show current identity
         run: |
           jf rt curl -sS api/system/ping
-          echo "Attempting dev -> qa promotion for ${APP_NAME}@${{ inputs.app_version }}"
+          echo "Attempting ${PROJECT_KEY}-DEV -> ${PROJECT_KEY}-QA promotion for ${APP_NAME}@${{ inputs.app_version }}"
 
       # Gates configured by 03-setup-apptrust.sh are evaluated here. Failing
       # either the security or Rego gate stops the promotion — nothing moves.
       - name: Promote application version to qa
         run: |
           set +e
-          output=$(jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" QA 2>&1)
+          output=$(jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" "${PROJECT_KEY}-QA" 2>&1)
           exit_code=$?
           echo "${output}"
           if [ $exit_code -ne 0 ]; then
             reason=$(echo "${output}" | grep -o '"message":"[^"]*"' | head -1 | sed 's/"message":"//;s/"$//')
             [ -z "${reason}" ] && reason="${output}"
-            echo "::error::Promotion DEV→QA failed: ${reason}"
+            echo "::error::Promotion ${PROJECT_KEY}-DEV→${PROJECT_KEY}-QA failed: ${reason}"
             {
-              echo "## Promotion DEV→QA Failed"
+              echo "## Promotion ${PROJECT_KEY}-DEV→${PROJECT_KEY}-QA Failed"
               echo "**Version:** ${{ inputs.app_version }}"
               echo "**Reason:** ${reason}"
             } >> "$GITHUB_STEP_SUMMARY"
@@ -90,8 +91,8 @@ jobs:
           cat > /tmp/promotion.predicate.json <<JSON
           {
             "event":       "promotion",
-            "source_stage":"dev",
-            "target_stage":"qa",
+            "source_stage":"${PROJECT_KEY}-DEV",
+            "target_stage":"${PROJECT_KEY}-QA",
             "application": "${APP_NAME}",
             "version":     "${{ inputs.app_version }}",
             "actor":       "${{ github.actor }}",

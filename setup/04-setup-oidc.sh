@@ -47,7 +47,7 @@ JSON
   local http
   http="$(rt_api_status POST "/access/api/v1/oidc" "$(cat "$tmp")")"
   case "$http" in
-    201|409) ok "integration ${integration} present" ;;
+    201|409|200) ok "integration ${integration} present" ;;
     *)       warn "unexpected status $http creating integration ${integration}" ;;
   esac
 
@@ -93,7 +93,8 @@ log "Setting repo-level variables"
 gh variable set JF_URL             --repo "${OWNER}/${REPO}" --body "${JF_URL}"
 gh variable set JF_DOCKER_REGISTRY --repo "${OWNER}/${REPO}" --body "${POC_DOCKER_REGISTRY_HOST}"
 gh variable set POC_APP_NAME       --repo "${OWNER}/${REPO}" --body "${APP}"
-ok "repo variables: JF_URL, JF_DOCKER_REGISTRY, POC_APP_NAME"
+gh variable set POC_PROJECT_KEY    --repo "${OWNER}/${REPO}" --body "${POC_PROJECT_KEY}"
+ok "repo variables: JF_URL, JF_DOCKER_REGISTRY, POC_APP_NAME, POC_PROJECT_KEY"
 
 # create_gh_env <stage> <oidc_provider_name> [require_review=true|false]
 create_gh_env() {
@@ -144,7 +145,7 @@ GitHub repo ${OWNER}/${REPO} is now configured:
   Environments created : dev, qa, prod
   qa + prod            : require reviewer approval before a workflow can
                          obtain an OIDC token for those stages
-  Repo variables set   : JF_URL, JF_DOCKER_REGISTRY, POC_APP_NAME
+  Repo variables set   : JF_URL, JF_DOCKER_REGISTRY, POC_APP_NAME, POC_PROJECT_KEY
   Env variable per env : JF_OIDC_PROVIDER
 
 You do NOT need to set any GitHub secret — all authentication is OIDC.

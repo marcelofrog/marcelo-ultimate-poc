@@ -122,6 +122,24 @@ policy rule.
 **Convention:** `<app>-evd-key`. Matches JFrog's own `evd` abbreviation for
 Evidence throughout the CLI (`jf evd create`, `--key-alias`).
 
+## Lifecycle stages
+
+**Convention:** `{project_key}-{STAGE}` via `lifecycle_stage`. The suffix is
+uppercase (`DEV`, `QA`, `PROD`) so the names match JFrog's environment
+convention and stay distinct from the platform-global `DEV`/`PROD` stages.
+These are **project** environments, created on `{project_key}` and registered
+as its promotion lifecycle — they are not visible to other projects.
+
+| Helper | Example (with `POC_PROJECT_KEY=mypoc`) |
+|--------|--------|
+| `lifecycle_stage dev`  | `mypoc-DEV` |
+| `lifecycle_stage qa`   | `mypoc-QA` |
+| `lifecycle_stage prod` | `mypoc-PROD` |
+
+These names are used when tagging stage-local repos, scoping the
+`apptrust-promoter` project role, attaching unified-policy gates, and as the
+target argument to `jf apptrust version-promote`.
+
 ## AppTrust application
 
 **Convention:** the application key is exactly `${POC_APP_NAME}`. No

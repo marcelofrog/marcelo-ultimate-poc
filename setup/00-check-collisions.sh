@@ -63,8 +63,11 @@ CHECKLIST=(
   "permission|$(perm_target prod writer)|permission_exists"
   "permission|$(prefix dev-build-info)|permission_exists"
 
-  # JFrog project
+  # JFrog project + project-prefixed lifecycle stages
   "project|${POC_PROJECT_KEY}|project_exists"
+  "lifecycle stage|$(lifecycle_stage dev)|environment_exists"
+  "lifecycle stage|$(lifecycle_stage qa)|environment_exists"
+  "lifecycle stage|$(lifecycle_stage prod)|environment_exists"
 
   # AppTrust application + unified policy gates
   "apptrust app|${APP}|apptrust_application_exists"

@@ -49,6 +49,7 @@ If step ① happens in the `dev` environment, GitHub embeds `environment=dev` in
 | Repo | `JF_URL`             | Variable | Your JFrog base URL |
 | Repo | `JF_DOCKER_REGISTRY` | Variable | Same host, no scheme |
 | Repo | `POC_APP_NAME`       | Variable | Whatever you passed in `.env` |
+| Repo | `POC_PROJECT_KEY`    | Variable | JFrog project key; workflows promote to `{POC_PROJECT_KEY}-DEV/QA/PROD` |
 | Env `dev`  | `JF_OIDC_PROVIDER` | Variable | `${APP}-github-dev` |
 | Env `qa`   | `JF_OIDC_PROVIDER` | Variable | `${APP}-github-qa` |
 | Env `prod` | `JF_OIDC_PROVIDER` | Variable | `${APP}-github-prod` |

@@ -1,11 +1,13 @@
 # -----------------------------------------------------------------------------
 # promote-unassigned-to-dev.yml
 #
-# Promotes an unassigned application version to the DEV lifecycle stage.
+# Promotes an unassigned application version to the project-prefixed DEV
+# lifecycle stage ({project_key}-DEV).
 #
 # Versions created by the build workflow land in the "unassigned" state
-# until explicitly promoted. Run this workflow to move a version into DEV
-# before it can proceed through the normal dev→qa→prod promotion chain.
+# until explicitly promoted. Run this workflow to move a version into
+# {project_key}-DEV before it can proceed through the normal
+# {project}-DEV → {project}-QA → {project}-PROD promotion chain.
 #
 # Uses the **dev** GitHub Environment so the OIDC token is minted for the
 # dev-stage identity (testapi-23jh-dev-svc) which holds the Developer +
@@ -17,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       app_version:
-        description: 'Application version to promote to DEV (e.g. 1.0.42-1234567)'
+        description: 'Application version to promote to {project}-DEV (e.g. 1.0.42-1234567)'
         required: true
 
 permissions:
@@ -30,6 +32,7 @@ jobs:
     environment: dev
     env:
       APP_NAME:         ${{ vars.POC_APP_NAME }}
+      PROJECT_KEY:      ${{ vars.POC_PROJECT_KEY }}
       JF_URL:           ${{ vars.JF_URL }}
       JF_OIDC_PROVIDER: ${{ vars.JF_OIDC_PROVIDER }}
 
@@ -47,8 +50,8 @@ jobs:
       - name: Show current identity
         run: |
           jf rt curl -sS api/system/ping
-          echo "Promoting ${APP_NAME}@${{ inputs.app_version }} from unassigned → DEV"
+          echo "Promoting ${APP_NAME}@${{ inputs.app_version }} from unassigned → ${PROJECT_KEY}-DEV"
 
       - name: Promote application version to DEV
         run: |
-          jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" DEV
+          jf apptrust version-promote "${APP_NAME}" "${{ inputs.app_version }}" "${PROJECT_KEY}-DEV"

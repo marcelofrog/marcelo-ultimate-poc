@@ -76,7 +76,7 @@ Passwords are never sourced from `.env` and never surfaced to the user. `02-setu
 The heart of the POC. Creates:
 
 1. **Stage repositories** — `${APP}-docker-dev-local`, `${APP}-docker-qa-local`, `${APP}-docker-prod-local` (all Docker V2, all indexed by Xray). The naming follows JFrog's `<team>-<technology>-<maturity>-<class>` convention; see [NAMING.md](NAMING.md).
-2. **AppTrust application** — `${APP}` with lifecycle `dev → qa → prod`, bound to the three repos.
+2. **AppTrust application** — `${APP}` with lifecycle `{project}-DEV → {project}-QA → {project}-PROD`, bound to the three repos.
 3. **Permission targets** — five targets that produce the RBAC matrix in the previous section.
 4. **Promotion gates:**
    - **Security gate** — `criteria.cvss_score_min = 9.0`, `applicability = ["applicable"]`, `action = block`. Only CVEs that Xray Contextual Analysis flags as reachable will block promotion. Non-applicable criticals are surfaced but don't block, which matches how real security teams operate.

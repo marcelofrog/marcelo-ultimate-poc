@@ -11,7 +11,7 @@ push to main
 build.yml (env: dev)  ─────────────────────────────────┐
     curation-audit               fail? job red         │
     docker build & push          ⇒ dev-local           │
-    apptrust app version         ⇒ stage: dev          │
+    apptrust app version         ⇒ stage: {project}-DEV │
     pytest → evidence            ⇒ signed predicate #1 │
     docker manifest → evidence   ⇒ signed predicate #2 │
     SLSA provenance → evidence   ⇒ signed predicate #3 │
@@ -22,7 +22,8 @@ build.yml (env: dev)  ───────────────────�
 promote-dev-to-qa.yml (env: qa, approval required)     │
     identity: <app>-qa-svc                                   │
     call: jf apptrust application-version-promote      │
-          --source-stage dev --target-stage qa         │
+          --source-stage {project}-DEV                 │
+          --target-stage {project}-QA                  │
           --wait-for-gates                             │
                                                        │
       JFrog evaluates BOTH gates:                      │
@@ -36,7 +37,7 @@ promote-dev-to-qa.yml (env: qa, approval required)     │
     ↓ human clicks "Run workflow"                      │
 promote-qa-to-prod.yml (env: prod, approval required)  │
     identity: <app>-prod-svc                                 │
-    same promote call, source qa target prod           │
+    same promote call, {project}-QA → {project}-PROD   │
     same gates re-evaluated                            │
     (Xray may find new CVEs in the meantime — the      │
      gate re-runs against current data.)               │
