@@ -200,8 +200,13 @@ for pt in \
 done
 
 # ---------- 5. OIDC integrations ---------------------------------------------
+# Every integration must go, including dev-promote. Its identity mapping is
+# scoped to a project role, and Access refuses to delete a project while any
+# mapping still references it ("Project containing identity mapping can't be
+# removed") — so a missed integration here surfaces later as an unexplained
+# failure in section 13.
 log "Removing OIDC integrations"
-for i in "$(oidc_int dev)" "$(oidc_int qa)" "$(oidc_int prod)"; do
+for i in "$(oidc_int dev)" "$(oidc_int dev-promote)" "$(oidc_int qa)" "$(oidc_int prod)"; do
   do_delete "oidc integration" "$i" oidc_integration_exists _del_oidc "$i"
 done
 
@@ -235,7 +240,8 @@ fi
 # Locals first (they reference remotes indirectly through virtuals/pipelines),
 # then remotes.
 log "Removing local stage repositories"
-for r in "$(repo_stage dev)" "$(repo_stage qa)" "$(repo_stage prod)" "$(repo_app_entity)"; do
+for r in "$(repo_stage dev)" "$(repo_stage qa)" "$(repo_stage prod)" \
+         "$(repo_app_entity)" "$(repo_project_versions)"; do
   do_delete "repo (local)" "$r" repo_exists _del_repo "$r"
 done
 
@@ -316,9 +322,10 @@ if (( PURGE_GH_SECRET == 1 )); then
 fi
 
 # ---------- 13. JFrog project ------------------------------------------------
-# Must run after repos, users and groups: Access rejects the delete while any
-# resource is still assigned to the project. The project-scoped custom role
-# 'apptrust-promoter' is removed with the project.
+# Must run after repos, users, groups and OIDC integrations: Access rejects the
+# delete while any resource is still assigned to the project, or while any OIDC
+# identity mapping is scoped to one of its roles. The project-scoped custom
+# roles (<app>-dev-role, -qa-role, -prod-role) are removed with the project.
 #
 # Record which stages are still live first: they hang off the project, so once
 # it is gone /projects/{key}/environments answers 404 for every name and
@@ -339,7 +346,7 @@ do_delete "project" "${POC_PROJECT_KEY}" project_exists _del_project "${POC_PROJ
 # project)" reported from the snapshot. The explicit DELETE only runs when the
 # project outlived this step (partial setup, or a dry run). It cannot run
 # earlier: Access returns 409 ("still referenced by non-admin roles") while the
-# project's apptrust-promoter role still scopes these stages.
+# project's custom stage roles still scope these stages.
 log "Removing lifecycle stages"
 for s in "$(lifecycle_stage dev)" "$(lifecycle_stage qa)" "$(lifecycle_stage prod)"; do
   if project_exists "${POC_PROJECT_KEY}"; then

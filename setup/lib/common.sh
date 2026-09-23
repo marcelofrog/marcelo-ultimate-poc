@@ -335,6 +335,10 @@ repo_stage()      { prefix "docker-$1-local"; }        # <app>-docker-dev-local
 # AppTrust creates this generic local repo implicitly when the application is
 # created, and leaves it behind when the application is deleted.
 repo_app_entity() { prefix "application-entity"; }     # <app>-application-entity
+# AppTrust also creates a release-bundles repo for the PROJECT (not the app) to
+# hold application versions. It is project-prefixed, so `prefix` does not apply,
+# and it outlives the project unless teardown removes it explicitly.
+repo_project_versions() { echo "${POC_PROJECT_KEY}-application-versions"; }
 # Service identities used by CI (via OIDC). The `-svc` suffix marks these
 # as service accounts in Admin UIs.
 stage_user()      { prefix "$1-svc"; }                 # <app>-dev-svc
