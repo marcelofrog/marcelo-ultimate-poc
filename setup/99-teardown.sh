@@ -195,7 +195,8 @@ for pt in \
     "$(perm_target qa   writer)" \
     "$(perm_target prod promoter)" \
     "$(perm_target prod writer)" \
-    "$(prefix dev-build-info)"; do
+    "$(prefix dev-build-info)" \
+    "$(prefix apptrust-evidence)"; do
   do_delete "permission" "$pt" permission_exists _del_perm "$pt"
 done
 

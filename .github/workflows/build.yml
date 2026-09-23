@@ -49,6 +49,16 @@ jobs:
       # Keep jf stdout as JSON/payload only. Info/Warn timestamps on stdout
       # make `jq` fail ("Invalid numeric literal") on curation-audit --format=json.
       JFROG_CLI_LOG_LEVEL: ERROR
+      # Build name for every `jf` call that does NOT pass --build-name explicitly
+      # — in practice the `jf pip install` of the test dependencies, which runs
+      # after the main build info has been published and so cannot join it.
+      # setup-jfrog-cli auto-publishes that leftover build info in its post step;
+      # left unset it defaults to the workflow name (`build`), an unprefixed key
+      # in the shared artifactory-build-info repo that no permission target can
+      # safely grant. The action only exports its default when the variable is
+      # absent, so setting it here wins.
+      JFROG_CLI_BUILD_NAME:   ${{ vars.POC_APP_NAME }}-ci
+      JFROG_CLI_BUILD_NUMBER: ${{ github.run_id }}
 
     steps:
       - name: Check out source

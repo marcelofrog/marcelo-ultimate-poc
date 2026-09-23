@@ -154,18 +154,66 @@ apply_perm "$(perm_target qa   promoter)" "$(group_stage qa)"   "[\"$(repo_stage
 apply_perm "$(perm_target prod promoter)" "$(group_stage prod)" "[\"$(repo_stage qa)\",\"$(repo_stage prod)\"]"
 
 # Build-info permission (v2 build section — must be separate from repo section).
+# Two build names, because the build info is published twice. `${APP}` is the
+# pipeline build that build.yml publishes explicitly and that the AppTrust
+# version is created from; `${APP}-ci` is what setup-jfrog-cli auto-publishes
+# in its post step for the build info collected after that point (the test
+# dependencies). Both live in the shared artifactory-build-info repo, so the
+# patterns have to name them — a build the pattern misses fails the whole
+# publish with HTTP 403 "not permitted to deploy".
 BUILD_INFO_PERM="$(prefix dev-build-info)"
 jf rt curl -sS -X PUT -H "Content-Type: application/json" \
   --data "{
     \"name\": \"${BUILD_INFO_PERM}\",
     \"build\": {
-      \"include-patterns\": [\"${APP}/**\"],
+      \"include-patterns\": [\"${APP}/**\",\"${APP}-ci/**\"],
       \"exclude-patterns\": [],
       \"repositories\": [\"artifactory-build-info\"],
       \"actions\": { \"groups\": { \"$(group_stage dev)\": [\"read\",\"write\",\"annotate\",\"delete\",\"manage\",\"managedXrayMeta\"] } }
     }
   }" "api/v2/security/permissions/${BUILD_INFO_PERM}" >/dev/null
 ok "build-info permission target: ${BUILD_INFO_PERM}"
+
+# AppTrust-managed repos. Creating the application implicitly creates
+# <app>-application-entity and <project>-application-versions; the latter holds
+# the signed version manifest (release-bundle.json.evd). `jf evd create
+# --application-version` reads that manifest to compute the subject checksum,
+# so an identity with no grant on these repos gets HTTP 403 on every
+# application-version attestation.
+#
+# The build identity's token is minted `applied-permissions/user` (see
+# 04-setup-oidc.sh), which carries permission-target grants only — the DEV
+# environment on its project role does not reach these repos. The grant
+# therefore has to be a permission target, not a role capability.
+#
+# The two repos need DIFFERENT sections of the v2 permissions API.
+# <project>-application-versions has packageType `releasebundles`, and
+# release-bundle repos are authorised by the `releaseBundle` section only —
+# naming one in the `repo` section is accepted with HTTP 200 and read back
+# intact, but grants nothing, so the 403 survives the fix.
+APPTRUST_PERM="$(prefix apptrust-evidence)"
+APPTRUST_ACTIONS="{ \"groups\": {
+        \"$(group_stage dev)\":  [\"read\",\"annotate\",\"write\"],
+        \"$(group_stage qa)\":   [\"read\",\"annotate\",\"write\"],
+        \"$(group_stage prod)\": [\"read\",\"annotate\",\"write\"]
+      } }"
+jf rt curl -sS -X PUT -H "Content-Type: application/json" \
+  --data "{
+    \"name\": \"${APPTRUST_PERM}\",
+    \"repo\": {
+      \"include-patterns\": [\"**\"],
+      \"exclude-patterns\": [],
+      \"repositories\": [\"$(repo_app_entity)\"],
+      \"actions\": ${APPTRUST_ACTIONS}
+    },
+    \"releaseBundle\": {
+      \"include-patterns\": [\"**\"],
+      \"exclude-patterns\": [],
+      \"repositories\": [\"$(repo_project_versions)\"],
+      \"actions\": ${APPTRUST_ACTIONS}
+    }
+  }" "api/v2/security/permissions/${APPTRUST_PERM}" >/dev/null
+ok "AppTrust evidence permission target: ${APPTRUST_PERM}"
 
 # =========== 3b. Project group roles =========================================
 # Assign lifecycle-stage groups to the JFrog project with the appropriate role.

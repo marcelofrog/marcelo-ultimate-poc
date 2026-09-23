@@ -62,6 +62,7 @@ CHECKLIST=(
   "permission|$(perm_target prod promoter)|permission_exists"
   "permission|$(perm_target prod writer)|permission_exists"
   "permission|$(prefix dev-build-info)|permission_exists"
+  "permission|$(prefix apptrust-evidence)|permission_exists"
 
   # JFrog project + project-prefixed lifecycle stages
   "project|${POC_PROJECT_KEY}|project_exists"
