@@ -26,7 +26,7 @@ ISSUER="https://token.actions.githubusercontent.com"
 AUDIENCE="jfrog-${APP}"
 
 create_oidc() {
-  local integration="$1" stage="$2" username="$3"
+  local integration="$1" stage="$2" username="$3" scope="$4"
   log "OIDC integration: ${integration}  (stage=${stage} user=${username})"
 
   # CLI-gap: as of jf CLI 2.68 there is no first-class `jf` subcommand for
@@ -52,10 +52,27 @@ JSON
   esac
 
   # 2. Create the single identity mapping that binds environment+repo to the user.
-  # Use user-scoped token (applied-permissions/user:) so the token includes both
-  # Artifactory permissions AND project role capabilities (e.g. AppTrust Manager
-  # → PROMOTE_APPLICATION_VERSION). Group-scoped tokens only carry Artifactory
-  # permission-target grants and miss project role capabilities.
+  #
+  # Scope choice is the whole ballgame, and the two forms are mutually
+  # exclusive — the identity-mapping API rejects a combined scope with
+  # "Using project scope with users/groups scopes is not allowed":
+  #
+  #   applied-permissions/user
+  #       Carries the user's Artifactory permission-target grants but NO
+  #       project role capabilities, so AppTrust rejects version-promote with
+  #       403 "no permissions to access the resource" — even when the user's
+  #       group holds a role granting PROMOTE_APPLICATION_VERSION, and even
+  #       when that role is Project Admin.
+  #
+  #   applied-permissions/roles:<project>:<role>
+  #       Carries project role capabilities, which is what AppTrust checks.
+  #       It drops the permission-target grants, so everything the job needs
+  #       has to be in the role — including repository access. That is why
+  #       03-setup-apptrust.sh puts the curated remotes inside the project and
+  #       builds one <app>-<stage>-role per identity.
+  #
+  # Role names must not contain spaces: space separates scopes, so a
+  # predefined role like "AppTrust Manager" cannot be named here at all.
   cat > "$tmp" <<JSON
 {
   "name": "${integration}-map",
@@ -63,11 +80,15 @@ JSON
   "claims": {"repository": "${OWNER}/${REPO}", "environment": "${stage}"},
   "token_spec": {
     "username": "${username}",
-    "scope": "applied-permissions/user:${username}",
+    "scope": "${scope}",
     "expires_in": 3600
   }
 }
 JSON
+  # POST returns 409 when the mapping already exists and does NOT update the
+  # token_spec, so drop the old mapping first — otherwise a re-run silently
+  # keeps a stale scope.
+  rt_api_status DELETE "/access/api/v1/oidc/${integration}/identity_mappings/${integration}-map" >/dev/null
   http="$(rt_api_status POST "/access/api/v1/oidc/${integration}/identity_mappings" "$(cat "$tmp")")"
   case "$http" in
     201|409) ok "identity mapping present for ${integration}" ;;
@@ -76,9 +97,11 @@ JSON
   rm -f "$tmp"
 }
 
-create_oidc "$(oidc_int dev)"  "dev"  "$(stage_user dev)"
-create_oidc "$(oidc_int qa)"   "qa"   "$(stage_user qa)"
-create_oidc "$(oidc_int prod)" "prod" "$(stage_user prod)"
+role_scope() { echo "applied-permissions/roles:${POC_PROJECT_KEY}:$(stage_role "$1")"; }
+
+create_oidc "$(oidc_int dev)"  "dev"  "$(stage_user dev)"  "$(role_scope dev)"
+create_oidc "$(oidc_int qa)"   "qa"   "$(stage_user qa)"   "$(role_scope qa)"
+create_oidc "$(oidc_int prod)" "prod" "$(stage_user prod)" "$(role_scope prod)"
 
 # ---------- GitHub side: environments + variables ----------------------------
 log "Configuring GitHub repo ${OWNER}/${REPO}"

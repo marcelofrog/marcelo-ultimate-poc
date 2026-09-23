@@ -10,8 +10,9 @@
 # {project}-DEV → {project}-QA → {project}-PROD promotion chain.
 #
 # Uses the **dev** GitHub Environment so the OIDC token is minted for the
-# dev-stage identity (testapi-23jh-dev-svc) which holds the Developer +
-# apptrust-promoter roles needed to call version-promote.
+# dev-stage identity (<app>-dev-svc). That token is scoped to the project role
+# <app>-dev-role, which is what carries PROMOTE_APPLICATION_VERSION — AppTrust
+# reads promote permissions from project roles, not from permission targets.
 # -----------------------------------------------------------------------------
 name: promote-unassigned-to-dev
 

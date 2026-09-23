@@ -93,6 +93,20 @@ for stage in dev qa prod; do
   ok "repo ${repo} → project=${PROJECT}, env=${stage_env}"
 done
 
+# The curated remotes have to join the project too. CI tokens are scoped to
+# project roles (see 04-setup-oidc.sh) and such a token can only see resources
+# the project owns — a remote left outside the project is invisible to the
+# build, no matter what permission targets say. They carry the DEV stage
+# environment because only the dev identity resolves through them.
+log "Assigning curated remotes to project '${PROJECT}'"
+for repo in "$(repo_pypi)" "$(repo_npm)" "$(repo_docker)"; do
+  code="$(jf rt curl -sS -o /dev/null -w '%{http_code}' -X POST "api/repositories/${repo}" \
+    -H "Content-Type: application/json" \
+    -d "{\"projectKey\":\"${PROJECT}\",\"environments\":[\"${STAGE_DEV}\"]}")"
+  [[ "$code" == "200" ]] || die "failed to assign remote ${repo} to project ${PROJECT} (HTTP ${code})"
+  ok "repo ${repo} → project=${PROJECT}, env=${STAGE_DEV}"
+done
+
 # =========== 2. AppTrust application =========================================
 log "Creating AppTrust application '${APP}'"
 if apptrust_application_exists "$APP"; then
@@ -168,27 +182,62 @@ assign_group_roles() {
   ok "project group roles: ${group} → $*"
 }
 
-# Custom role: AppTrust Manager predefined role only covers the project's
-# default DEV+PROD stages. Promoting to QA requires a role whose environment
-# scope includes the project-prefixed QA stage.
-# CUSTOM type roles can cover all three; CUSTOM_GLOBAL is rejected by this API.
-PROMOTER_ROLE="apptrust-promoter"
-if rt_api GET "/access/api/v1/projects/${PROJECT}/roles/${PROMOTER_ROLE}" 2>/dev/null | jq -e '.name' >/dev/null 2>&1; then
-  ok "custom role '${PROMOTER_ROLE}' already exists"
-else
-  role_resp="$(rt_api POST "/access/api/v1/projects/${PROJECT}/roles" \
-    "{\"name\":\"${PROMOTER_ROLE}\",\"type\":\"CUSTOM\",\"description\":\"Promote AppTrust versions across all stages (${STAGE_DEV}→${STAGE_QA}→${STAGE_PROD})\",\"environments\":[\"${STAGE_DEV}\",\"${STAGE_QA}\",\"${STAGE_PROD}\"],\"actions\":[\"READ_APPLICATION\",\"READ_APPLICATION_VERSION\",\"PROMOTE_APPLICATION_VERSION\"]}" 2>/dev/null)" \
-    || die "failed to create custom role '${PROMOTER_ROLE}': ${role_resp}"
-  ok "created custom role '${PROMOTER_ROLE}' (${STAGE_DEV}+${STAGE_QA}+${STAGE_PROD}, PROMOTE_APPLICATION_VERSION)"
-fi
+# ---- Custom stage roles ------------------------------------------------------
+# CI tokens are minted with `applied-permissions/roles:<project>:<role>` (see
+# 04-setup-oidc.sh), so everything a stage identity is allowed to do has to live
+# in a single project role. Three properties of AppTrust promotion drive the
+# shape of these roles, all of them established by testing against the API:
+#
+#   1. Promotion authorisation reads project ROLE capabilities. A token scoped
+#      `applied-permissions/user` carries the user's permission-target grants
+#      but no role capabilities, so version-promote returns 403 "no permissions
+#      to access the resource" — even for a Project Admin.
+#   2. The permissions must come from ONE role. A role granting the source
+#      stage plus a second role granting the global DEV environment is not
+#      enough; the role that covers the source stage must cover DEV as well.
+#      DEV is where <app>-application-entity and <project>-application-versions
+#      live, which promotion writes to.
+#   3. A promoter needs BIND_APPLICATION and DEPLOY_CACHE_REPOSITORY, not just
+#      PROMOTE_APPLICATION_VERSION. Copy promotion writes into both the source
+#      and the target stage, so a read-only grant on the source stage fails.
+#
+# Isolation still holds where it matters: dev cannot touch QA or PROD, and qa
+# cannot touch PROD.
+PROMOTER_ACTIONS='"READ_REPOSITORY","ANNOTATE_REPOSITORY","DEPLOY_CACHE_REPOSITORY","READ_BUILD","READ_APPLICATION","BIND_APPLICATION","READ_APPLICATION_VERSION","ANNOTATE_APPLICATION_VERSION","PROMOTE_APPLICATION_VERSION","READ_APPTRUST_POLICY"'
+# dev additionally builds and pushes images, publishes build info and creates
+# application versions.
+DEV_ACTIONS='"READ_REPOSITORY","ANNOTATE_REPOSITORY","DEPLOY_CACHE_REPOSITORY","DELETE_OVERWRITE_REPOSITORY","READ_BUILD","ANNOTATE_BUILD","DEPLOY_BUILD","DELETE_BUILD","READ_APPLICATION","BIND_APPLICATION","CREATE_APPLICATION_VERSION","READ_APPLICATION_VERSION","ANNOTATE_APPLICATION_VERSION","PROMOTE_APPLICATION_VERSION","READ_APPTRUST_POLICY"'
 
-# Developer: CREATE_APPLICATION_VERSION + DEPLOY_BUILD (needed for build.yml).
-# apptrust-promoter: PROMOTE_APPLICATION_VERSION so build.yml can promote
-# the newly-created version from unassigned → DEV in the same workflow run.
-assign_group_roles "$(group_stage dev)"  "Developer" "${PROMOTER_ROLE}"
-# Contributor + AppTrust Manager (admin tasks) + apptrust-promoter (QA env scope)
-assign_group_roles "$(group_stage qa)"   "Contributor" "AppTrust Manager" "${PROMOTER_ROLE}"
-assign_group_roles "$(group_stage prod)" "Contributor" "AppTrust Manager" "${PROMOTER_ROLE}"
+# upsert_stage_role NAME DESCRIPTION ENVIRONMENTS_JSON ACTIONS_JSON
+# POST creates, PUT replaces — try PUT first so re-runs converge on the
+# definition below rather than leaving an older role in place.
+upsert_stage_role() {
+  local name="$1" desc="$2" envs="$3" actions="$4"
+  local payload="{\"name\":\"${name}\",\"type\":\"CUSTOM\",\"description\":\"${desc}\",\"environments\":${envs},\"actions\":[${actions}]}"
+  local code
+  code="$(rt_api_status PUT "/access/api/v1/projects/${PROJECT}/roles/${name}" "$payload")"
+  if [[ "$code" != 20* ]]; then
+    code="$(rt_api_status POST "/access/api/v1/projects/${PROJECT}/roles" "$payload")"
+    [[ "$code" == 20* ]] || die "failed to create custom role '${name}' (HTTP ${code})"
+  fi
+  ok "custom role: ${name}"
+}
+
+upsert_stage_role "$(stage_role dev)" \
+  "dev CI identity: build, push to the ${STAGE_DEV} repo, create versions, promote unassigned into ${STAGE_DEV}" \
+  "[\"DEV\",\"${STAGE_DEV}\"]" "$DEV_ACTIONS"
+upsert_stage_role "$(stage_role qa)" \
+  "qa CI identity: promote ${STAGE_DEV} to ${STAGE_QA} and attach promotion evidence" \
+  "[\"DEV\",\"${STAGE_DEV}\",\"${STAGE_QA}\"]" "$PROMOTER_ACTIONS"
+upsert_stage_role "$(stage_role prod)" \
+  "prod CI identity: promote ${STAGE_QA} to ${STAGE_PROD} and attach promotion evidence" \
+  "[\"DEV\",\"${STAGE_QA}\",\"${STAGE_PROD}\"]" "$PROMOTER_ACTIONS"
+
+# Each group carries exactly its own stage role — that role is what the OIDC
+# token for the matching GitHub Environment is scoped to.
+assign_group_roles "$(group_stage dev)"  "$(stage_role dev)"
+assign_group_roles "$(group_stage qa)"   "$(stage_role qa)"
+assign_group_roles "$(group_stage prod)" "$(stage_role prod)"
 
 # =========== 4. Promotion gates (Unified Policy API) =========================
 # CLI-gap: `jf apptrust` has no gate-management subcommand; use the unified

@@ -339,6 +339,9 @@ repo_app_entity() { prefix "application-entity"; }     # <app>-application-entit
 # as service accounts in Admin UIs.
 stage_user()      { prefix "$1-svc"; }                 # <app>-dev-svc
 group_stage()     { prefix "$1-group"; }               # <app>-dev-group
+# Custom project roles — one per stage identity. These carry the AppTrust
+# capabilities that CI tokens are scoped to (see 04-setup-oidc.sh).
+stage_role()      { prefix "$1-role"; }                # <app>-dev-role
 # Permission targets — role suffix reads as English: writer / promoter.
 perm_target()     { prefix "$1-$2"; }                  # <app>-dev-writer
 policy_id()       { prefix "$1"; }
