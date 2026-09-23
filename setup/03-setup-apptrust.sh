@@ -248,10 +248,16 @@ assign_group_roles() {
 #   3. A promoter needs BIND_APPLICATION and DEPLOY_CACHE_REPOSITORY, not just
 #      PROMOTE_APPLICATION_VERSION. Copy promotion writes into both the source
 #      and the target stage, so a read-only grant on the source stage fails.
+#   4. A promoter that attaches evidence also needs the RELEASE_BUNDLE actions.
+#      <project>-application-versions has packageType `releasebundles`, and the
+#      *_REPOSITORY actions do not reach that repo type — `jf evd create`
+#      against an application version fails with 403 "no annotate permission
+#      for the repository: <project>-application-versions". Promotion itself
+#      passes without them, so this only shows up on the evidence step.
 #
 # Isolation still holds where it matters: dev cannot touch QA or PROD, and qa
 # cannot touch PROD.
-PROMOTER_ACTIONS='"READ_REPOSITORY","ANNOTATE_REPOSITORY","DEPLOY_CACHE_REPOSITORY","READ_BUILD","READ_APPLICATION","BIND_APPLICATION","READ_APPLICATION_VERSION","ANNOTATE_APPLICATION_VERSION","PROMOTE_APPLICATION_VERSION","READ_APPTRUST_POLICY"'
+PROMOTER_ACTIONS='"READ_REPOSITORY","ANNOTATE_REPOSITORY","DEPLOY_CACHE_REPOSITORY","READ_RELEASE_BUNDLE","ANNOTATE_RELEASE_BUNDLE","READ_BUILD","READ_APPLICATION","BIND_APPLICATION","READ_APPLICATION_VERSION","ANNOTATE_APPLICATION_VERSION","PROMOTE_APPLICATION_VERSION","READ_APPTRUST_POLICY"'
 # dev additionally builds and pushes images, publishes build info and creates
 # application versions.
 DEV_ACTIONS='"READ_REPOSITORY","ANNOTATE_REPOSITORY","DEPLOY_CACHE_REPOSITORY","DELETE_OVERWRITE_REPOSITORY","READ_BUILD","ANNOTATE_BUILD","DEPLOY_BUILD","DELETE_BUILD","READ_APPLICATION","BIND_APPLICATION","CREATE_APPLICATION_VERSION","READ_APPLICATION_VERSION","ANNOTATE_APPLICATION_VERSION","PROMOTE_APPLICATION_VERSION","READ_APPTRUST_POLICY"'
