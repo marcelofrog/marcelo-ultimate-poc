@@ -2,10 +2,14 @@
 # -----------------------------------------------------------------------------
 # 04-setup-oidc.sh <github-org/repo>
 #
-# Creates THREE OIDC integrations in JFrog, one per lifecycle stage. Each is
-# bound to a specific GitHub Environment, so a workflow that requests the
-# `dev` environment can only receive tokens for the `<app>-dev-svc` user — GitHub
-# itself refuses to mint an OIDC token for `qa` or `prod` to that job.
+# Creates FOUR OIDC integrations in JFrog. Each is bound to a specific GitHub
+# Environment, so a workflow that requests the `dev` environment can only
+# receive tokens for the `<app>-dev-svc` user — GitHub itself refuses to mint
+# an OIDC token for `qa` or `prod` to that job.
+#
+# dev has two of them because AppTrust wants opposite token scopes for
+# creating a version and for promoting one (see create_oidc below). Both map
+# to the same `<app>-dev-svc` user, so the identity boundary is unchanged.
 #
 # This is the core RBAC boundary of the POC. Do not skip it.
 # -----------------------------------------------------------------------------
@@ -59,17 +63,20 @@ JSON
   #
   #   applied-permissions/user
   #       Carries the user's Artifactory permission-target grants but NO
-  #       project role capabilities, so AppTrust rejects version-promote with
-  #       403 "no permissions to access the resource" — even when the user's
-  #       group holds a role granting PROMOTE_APPLICATION_VERSION, and even
-  #       when that role is Project Admin.
+  #       project role capabilities. Required by apptrust version-create.
+  #       AppTrust rejects version-promote under this scope with 403 "no
+  #       permissions to access the resource" — even when the user's group
+  #       holds a role granting PROMOTE_APPLICATION_VERSION, and even when
+  #       that role is Project Admin.
   #
   #   applied-permissions/roles:<project>:<role>
-  #       Carries project role capabilities, which is what AppTrust checks.
-  #       It drops the permission-target grants, so everything the job needs
-  #       has to be in the role — including repository access. That is why
-  #       03-setup-apptrust.sh puts the curated remotes inside the project and
-  #       builds one <app>-<stage>-role per identity.
+  #       Carries project role capabilities, which is what version-promote
+  #       checks. It drops the permission-target grants, and version-create
+  #       fails under it with "Insufficient permissions".
+  #
+  # The two AppTrust operations therefore cannot share a token, which is why
+  # dev has two integrations: build.yml creates versions, and
+  # promote-unassigned-to-dev.yml promotes them.
   #
   # Role names must not contain spaces: space separates scopes, so a
   # predefined role like "AppTrust Manager" cannot be named here at all.
@@ -99,9 +106,12 @@ JSON
 
 role_scope() { echo "applied-permissions/roles:${POC_PROJECT_KEY}:$(stage_role "$1")"; }
 
-create_oidc "$(oidc_int dev)"  "dev"  "$(stage_user dev)"  "$(role_scope dev)"
-create_oidc "$(oidc_int qa)"   "qa"   "$(stage_user qa)"   "$(role_scope qa)"
-create_oidc "$(oidc_int prod)" "prod" "$(stage_user prod)" "$(role_scope prod)"
+# All four map to the same three service users — what differs is the token
+# scope, and therefore what the job is allowed to do.
+create_oidc "$(oidc_int dev)"         "dev"         "$(stage_user dev)"  "applied-permissions/user"
+create_oidc "$(oidc_int dev-promote)" "dev-promote" "$(stage_user dev)"  "$(role_scope dev)"
+create_oidc "$(oidc_int qa)"          "qa"          "$(stage_user qa)"   "$(role_scope qa)"
+create_oidc "$(oidc_int prod)"        "prod"        "$(stage_user prod)" "$(role_scope prod)"
 
 # ---------- GitHub side: environments + variables ----------------------------
 log "Configuring GitHub repo ${OWNER}/${REPO}"
@@ -154,9 +164,10 @@ create_gh_env() {
   fi
 }
 
-create_gh_env "dev"  "$(oidc_int dev)"  false
-create_gh_env "qa"   "$(oidc_int qa)"   true
-create_gh_env "prod" "$(oidc_int prod)" true
+create_gh_env "dev"         "$(oidc_int dev)"         false
+create_gh_env "dev-promote" "$(oidc_int dev-promote)" false
+create_gh_env "qa"          "$(oidc_int qa)"          true
+create_gh_env "prod"        "$(oidc_int prod)"        true
 
 ok "OIDC setup complete."
 
@@ -165,7 +176,7 @@ cat <<EOF
 ────────────────────────────────────────────────────────────────────────────
 GitHub repo ${OWNER}/${REPO} is now configured:
 
-  Environments created : dev, qa, prod
+  Environments created : dev, dev-promote, qa, prod
   qa + prod            : require reviewer approval before a workflow can
                          obtain an OIDC token for those stages
   Repo variables set   : JF_URL, JF_DOCKER_REGISTRY, POC_APP_NAME, POC_PROJECT_KEY

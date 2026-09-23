@@ -9,10 +9,11 @@
 # {project_key}-DEV before it can proceed through the normal
 # {project}-DEV → {project}-QA → {project}-PROD promotion chain.
 #
-# Uses the **dev** GitHub Environment so the OIDC token is minted for the
-# dev-stage identity (<app>-dev-svc). That token is scoped to the project role
-# <app>-dev-role, which is what carries PROMOTE_APPLICATION_VERSION — AppTrust
-# reads promote permissions from project roles, not from permission targets.
+# Uses the **dev-promote** GitHub Environment rather than **dev**. Both mint a
+# token for the same dev-stage identity (<app>-dev-svc), but dev-promote scopes
+# it to the project role <app>-dev-role. AppTrust reads promote permissions
+# from project roles, not from permission targets, so the plain `dev` token
+# that build.yml uses is rejected here with 403.
 # -----------------------------------------------------------------------------
 name: promote-unassigned-to-dev
 
@@ -30,7 +31,7 @@ permissions:
 jobs:
   promote:
     runs-on: ubuntu-latest
-    environment: dev
+    environment: dev-promote
     env:
       APP_NAME:         ${{ vars.POC_APP_NAME }}
       PROJECT_KEY:      ${{ vars.POC_PROJECT_KEY }}

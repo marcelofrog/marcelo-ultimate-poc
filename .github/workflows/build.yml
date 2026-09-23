@@ -38,7 +38,6 @@ jobs:
     environment: dev    # ← binds this job to the `dev` GitHub Environment
     env:
       APP_NAME:            ${{ vars.POC_APP_NAME }}
-      PROJECT_KEY:         ${{ vars.POC_PROJECT_KEY }}
       JF_URL:              ${{ vars.JF_URL }}
       JF_DOCKER_REGISTRY:  ${{ vars.JF_DOCKER_REGISTRY }}
       JF_OIDC_PROVIDER:    ${{ vars.JF_OIDC_PROVIDER }}      # dev-scoped OIDC integration
@@ -203,23 +202,17 @@ jobs:
         id: push
         run: |
           jf docker push "${{ steps.tag.outputs.image }}" \
-            --build-name="${APP_NAME}" --build-number="${{ github.run_id }}" \
-            --project="${PROJECT_KEY}"
+            --build-name="${APP_NAME}" --build-number="${{ github.run_id }}"
           # Resolve immutable digest — evidence must reference the digest,
           # not the mutable tag.
           digest="$(docker inspect --format='{{index .RepoDigests 0}}' "${{ steps.tag.outputs.image }}" | awk -F@ '{print $2}')"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
-      # --project is required: the CI token is scoped to project roles, which
-      # cannot reach the platform-wide artifactory-build-info repo. Without it
-      # build-publish fails with "not permitted to deploy ... into
-      # 'artifactory-build-info'". With it, the build lands in the project's
-      # own build-info repo.
       - name: Publish build info
         run: |
-          jf rt build-collect-env "${APP_NAME}" "${{ github.run_id }}" --project="${PROJECT_KEY}"
-          jf rt build-add-git     "${APP_NAME}" "${{ github.run_id }}" --project="${PROJECT_KEY}"
-          jf rt build-publish     "${APP_NAME}" "${{ github.run_id }}" --project="${PROJECT_KEY}"
+          jf rt build-collect-env "${APP_NAME}" "${{ github.run_id }}"
+          jf rt build-add-git     "${APP_NAME}" "${{ github.run_id }}"
+          jf rt build-publish     "${APP_NAME}" "${{ github.run_id }}"
 
       # ---------- 5. AppTrust application version -----------------------------
       # Called over REST rather than `jf apptrust version-create` because the
@@ -234,16 +227,12 @@ jobs:
             exit 1
           fi
 
-          # source is the build info published in the previous step. Because
-          # that build went to the project's build-info repo rather than the
-          # platform-wide artifactory-build-info, repository_key has to say so
-          # — the default would resolve to a build this identity cannot see.
+          # source is the build info published in the previous step.
           jq -n \
             --arg version "${{ steps.tag.outputs.app_version }}" \
             --arg build   "${APP_NAME}" \
             --arg number  "${{ github.run_id }}" \
-            --arg repo    "${PROJECT_KEY}-build-info" \
-            '{version: $version, sources: {builds: [{name: $build, number: $number, repository_key: $repo}]}}' \
+            '{version: $version, sources: {builds: [{name: $build, number: $number}]}}' \
             > "$RUNNER_TEMP/version-create.json"
 
           jf api "/apptrust/api/v1/applications/${APP_NAME}/versions?async=false" \
