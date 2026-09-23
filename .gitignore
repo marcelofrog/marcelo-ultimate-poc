@@ -20,3 +20,5 @@ __pycache__/
 .idea/
 .vscode/
 *.swp
+setup/.env_d
+setup/.env_j
