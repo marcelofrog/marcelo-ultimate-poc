@@ -282,6 +282,12 @@ jobs:
             --key                 "${EVD_KEY_PATH}" \
             --key-alias           "${EVD_KEY_ALIAS}"
 
+      - name: Publish build info
+        run: |
+          jf rt build-collect-env "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
+          jf rt build-add-git     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
+          jf rt build-publish     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
+          
       # ---------- 6. Provenance predicate -------------------------------------
       - name: Build provenance predicate
         run: |
@@ -322,12 +328,7 @@ jobs:
             --key                 "${EVD_KEY_PATH}" \
             --key-alias           "${EVD_KEY_ALIAS}"
 
-      - name: Publish build info
-        run: |
-          jf rt build-collect-env "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
-          jf rt build-add-git     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
-          jf rt build-publish     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
-          
+
       # ---------- 7. AppTrust application version -----------------------------
       # Called over REST rather than `jf apptrust version-create` because the
       # signing key for the version manifest is selectable only via the
