@@ -371,8 +371,8 @@ jobs:
           jf evd create \
             --predicate           evidence/provenance.predicate.json \
             --predicate-type      "https://jfrog.com/evidence/build-signature/v1" \
-            --build_name          "${JFROG_CLI_BUILD_NAME}" \
-            --build_number        "${JFROG_CLI_BUILD_NUMBER}" \
+            --build-name          "${JFROG_CLI_BUILD_NAME}" \
+            --build-number        "${JFROG_CLI_BUILD_NUMBER}" \
             --key                 "${EVD_KEY_PATH}" \
             --key-alias           "${EVD_KEY_ALIAS}"
 
