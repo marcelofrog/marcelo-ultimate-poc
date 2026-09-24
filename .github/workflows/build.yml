@@ -330,7 +330,9 @@ jobs:
           jf evd create \
             --predicate           evidence/image.predicate.json \
             --predicate-type      "https://jfrog.com/evidence/artifact/v1" \
-            --subject-repo-path   "${DEV_REPO}/${APP_NAME}/${{ github.run_id }}/manifest.json" \
+            --package-name ${APP_NAME} \
+            --package-version ${{ github.run_id }} \
+            --package-repo-name ${DEV_REPO} \
             --key                 "${EVD_KEY_PATH}" \
             --key-alias           "${EVD_KEY_ALIAS}"
 

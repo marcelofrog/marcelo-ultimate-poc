@@ -98,7 +98,7 @@ JSON
   rt_api_status DELETE "/access/api/v1/oidc/${integration}/identity_mappings/${integration}-map" >/dev/null
   http="$(rt_api_status POST "/access/api/v1/oidc/${integration}/identity_mappings" "$(cat "$tmp")")"
   case "$http" in
-    201|409) ok "identity mapping present for ${integration}" ;;
+    201|409|200) ok "identity mapping present for ${integration}" ;;
     *)       warn "unexpected status $http creating mapping for ${integration}" ;;
   esac
   rm -f "$tmp"
