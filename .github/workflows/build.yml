@@ -319,17 +319,17 @@ jobs:
         run: |
           # Attach at BOTH the application-version level (so promotion sees it)
           # AND the artifact level (so image consumers can verify).
-          jf evd create \
-            --predicate           evidence/image.predicate.json \
-            --predicate-type      "https://jfrog.com/evidence/artifact/v1" \
-            --application-key     "${APP_NAME}" \
-            --application-version "${{ steps.tag.outputs.app_version }}" \
-            --key                 "${EVD_KEY_PATH}" \
-            --key-alias           "${EVD_KEY_ALIAS}"
+          # jf evd create \
+          #   --predicate           evidence/image.predicate.json \
+          #   --predicate-type      "https://jfrog.com/evidence/artifact/v1" \
+          #   --application-key     "${APP_NAME}" \
+          #   --application-version "${{ steps.tag.outputs.app_version }}" \
+          #   --key                 "${EVD_KEY_PATH}" \
+          #   --key-alias           "${EVD_KEY_ALIAS}"
 
           jf evd create \
             --predicate           evidence/image.predicate.json \
-            --predicate-type      "https://jfrog.com/evidence/artifact/v1" \
+            --predicate-type      "https://jfrog.com/evidence/signature/v1" \
             --package-name ${APP_NAME} \
             --package-version ${{ github.run_id }} \
             --package-repo-name ${DEV_REPO} \
@@ -370,9 +370,9 @@ jobs:
         run: |
           jf evd create \
             --predicate           evidence/provenance.predicate.json \
-            --predicate-type      "https://slsa.dev/provenance/v1" \
-            --application-key     "${APP_NAME}" \
-            --application-version "${{ steps.tag.outputs.app_version }}" \
+            --predicate-type      "https://jfrog.com/evidence/build-signature/v1" \
+            --build_name          "${JFROG_CLI_BUILD_NAME}" \
+            --build_number        "${JFROG_CLI_BUILD_NUMBER}" \
             --key                 "${EVD_KEY_PATH}" \
             --key-alias           "${EVD_KEY_ALIAS}"
 
