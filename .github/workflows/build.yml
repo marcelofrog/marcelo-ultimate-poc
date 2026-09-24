@@ -220,9 +220,9 @@ jobs:
 
       - name: Publish build info
         run: |
-          jf rt build-collect-env "${APP_NAME}" "${{ github.run_id }}"
-          jf rt build-add-git     "${APP_NAME}" "${{ github.run_id }}"
-          jf rt build-publish     "${APP_NAME}" "${{ github.run_id }}"
+          jf rt build-collect-env "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
+          jf rt build-add-git     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
+          jf rt build-publish     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
 
       # ---------- 5. AppTrust application version -----------------------------
       # Called over REST rather than `jf apptrust version-create` because the
@@ -240,8 +240,8 @@ jobs:
           # source is the build info published in the previous step.
           jq -n \
             --arg version "${{ steps.tag.outputs.app_version }}" \
-            --arg build   "${APP_NAME}" \
-            --arg number  "${{ github.run_id }}" \
+            --arg build   "${JFROG_CLI_BUILD_NAME}" \
+            --arg number  "${JFROG_CLI_BUILD_NUMBER}" \
             '{version: $version, sources: {builds: [{name: $build, number: $number}]}}' \
             > "$RUNNER_TEMP/version-create.json"
 
