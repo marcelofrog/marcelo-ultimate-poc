@@ -9,15 +9,13 @@
 #   3. Build the docker image pulling base image + wheels from the curated
 #      remotes.
 #   4. Push the image to the dev-stage local repo.
-#   5. Create an AppTrust application version tagged with the run id, signed
+#   5. Execute the pytest suite.
+#   6. Sign docker-image Evidence (image-digest attestation).
+#   7. Create an AppTrust application version tagged with the run id, signed
 #      with this project's own lifecycle key pair.
-#   6. Execute the pytest suite.
-#   7. Sign and publish THREE Evidence attestations against the application
-#      version, all signed with the same key that was provisioned by
-#      setup/03a-setup-signing-key.sh:
-#         - test-results   (satisfies the Rego promotion gate)
-#         - docker image   (image-digest attestation)
-#         - provenance     (SLSA-style build provenance)
+#   8. Sign test-results and provenance Evidence against that version / build.
+#      All evidence is signed with the key provisioned by
+#      setup/03a-setup-signing-key.sh.
 # -----------------------------------------------------------------------------
 name: build
 
@@ -218,40 +216,8 @@ jobs:
           digest="$(docker inspect --format='{{index .RepoDigests 0}}' "${{ steps.tag.outputs.image }}" | awk -F@ '{print $2}')"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
-      - name: Publish build info
-        run: |
-          jf rt build-collect-env "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
-          jf rt build-add-git     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
-          jf rt build-publish     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
 
-      # ---------- 5. AppTrust application version -----------------------------
-      # Called over REST rather than `jf apptrust version-create` because the
-      # signing key for the version manifest is selectable only via the
-      # X-JFrog-Signing-Key-Name header, which the CLI does not expose. Without
-      # it AppTrust signs with the shared default-lifecycle-key, and copy
-      # promotion later fails to verify that signature.
-      - name: Create AppTrust application version
-        run: |
-          if [ -z "${LIFECYCLE_KEY_NAME}" ]; then
-            echo "::error::POC_LIFECYCLE_KEY_NAME variable missing. Did 03a-setup-signing-key.sh run to completion?"
-            exit 1
-          fi
-
-          # source is the build info published in the previous step.
-          jq -n \
-            --arg version "${{ steps.tag.outputs.app_version }}" \
-            --arg build   "${JFROG_CLI_BUILD_NAME}" \
-            --arg number  "${JFROG_CLI_BUILD_NUMBER}" \
-            '{version: $version, sources: {builds: [{name: $build, number: $number}]}}' \
-            > "$RUNNER_TEMP/version-create.json"
-
-          jf api "/apptrust/api/v1/applications/${APP_NAME}/versions?async=false" \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -H "X-JFrog-Signing-Key-Name: ${LIFECYCLE_KEY_NAME}" \
-            --input "$RUNNER_TEMP/version-create.json"
-
-      # ---------- 6. Tests ----------------------------------------------------
+      # ---------- 5. Tests ----------------------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -269,7 +235,7 @@ jobs:
           mkdir -p ../evidence
           pytest
 
-      # ---------- 7a. Signed evidence: test results ---------------------------
+      # ---------- 6. Evidence predicates --------------------------------------
       - name: Build test-results predicate
         id: predicate
         run: |
@@ -290,17 +256,7 @@ jobs:
           echo "passed=${passed}"  >> "$GITHUB_OUTPUT"
           echo "failed=${failed}"  >> "$GITHUB_OUTPUT"
 
-      - name: Sign & attach test-results evidence
-        run: |
-          jf evd create \
-            --predicate           evidence/test-results.predicate.json \
-            --predicate-type      "https://jfrog.com/evidence/test-results/v1" \
-            --application-key     "${APP_NAME}" \
-            --application-version "${{ steps.tag.outputs.app_version }}" \
-            --key                 "${EVD_KEY_PATH}" \
-            --key-alias           "${EVD_KEY_ALIAS}"
-
-      # ---------- 7b. Signed evidence: docker image (digest attestation) ------
+      # ---------- 6. Signed evidence: docker image (digest attestation) ------
       - name: Build docker-image predicate
         run: |
           cat > evidence/image.predicate.json <<JSON
@@ -317,16 +273,6 @@ jobs:
 
       - name: Sign & attach docker-image evidence
         run: |
-          # Attach at BOTH the application-version level (so promotion sees it)
-          # AND the artifact level (so image consumers can verify).
-          # jf evd create \
-          #   --predicate           evidence/image.predicate.json \
-          #   --predicate-type      "https://jfrog.com/evidence/artifact/v1" \
-          #   --application-key     "${APP_NAME}" \
-          #   --application-version "${{ steps.tag.outputs.app_version }}" \
-          #   --key                 "${EVD_KEY_PATH}" \
-          #   --key-alias           "${EVD_KEY_ALIAS}"
-
           jf evd create \
             --predicate           evidence/image.predicate.json \
             --predicate-type      "https://jfrog.com/evidence/signature/v1" \
@@ -336,7 +282,7 @@ jobs:
             --key                 "${EVD_KEY_PATH}" \
             --key-alias           "${EVD_KEY_ALIAS}"
 
-      # ---------- 7c. Signed evidence: SLSA-style provenance ------------------
+      # ---------- 6. Provenance predicate -------------------------------------
       - name: Build provenance predicate
         run: |
           cat > evidence/provenance.predicate.json <<JSON
@@ -375,6 +321,51 @@ jobs:
             --build-number        "${JFROG_CLI_BUILD_NUMBER}" \
             --key                 "${EVD_KEY_PATH}" \
             --key-alias           "${EVD_KEY_ALIAS}"
+
+      - name: Publish build info
+        run: |
+          jf rt build-collect-env "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
+          jf rt build-add-git     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
+          jf rt build-publish     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
+          
+      # ---------- 7. AppTrust application version -----------------------------
+      # Called over REST rather than `jf apptrust version-create` because the
+      # signing key for the version manifest is selectable only via the
+      # X-JFrog-Signing-Key-Name header, which the CLI does not expose. Without
+      # it AppTrust signs with the shared default-lifecycle-key, and copy
+      # promotion later fails to verify that signature.
+      - name: Create AppTrust application version
+        run: |
+          if [ -z "${LIFECYCLE_KEY_NAME}" ]; then
+            echo "::error::POC_LIFECYCLE_KEY_NAME variable missing. Did 03a-setup-signing-key.sh run to completion?"
+            exit 1
+          fi
+
+          # source is the build info published earlier in this job.
+          jq -n \
+            --arg version "${{ steps.tag.outputs.app_version }}" \
+            --arg build   "${JFROG_CLI_BUILD_NAME}" \
+            --arg number  "${JFROG_CLI_BUILD_NUMBER}" \
+            '{version: $version, sources: {builds: [{name: $build, number: $number}]}}' \
+            > "$RUNNER_TEMP/version-create.json"
+
+          jf api "/apptrust/api/v1/applications/${APP_NAME}/versions?async=false" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-JFrog-Signing-Key-Name: ${LIFECYCLE_KEY_NAME}" \
+            --input "$RUNNER_TEMP/version-create.json"
+
+      - name: Sign & attach test-results evidence
+        run: |
+          jf evd create \
+            --predicate           evidence/test-results.predicate.json \
+            --predicate-type      "https://jfrog.com/evidence/test-results/v1" \
+            --application-key     "${APP_NAME}" \
+            --application-version "${{ steps.tag.outputs.app_version }}" \
+            --key                 "${EVD_KEY_PATH}" \
+            --key-alias           "${EVD_KEY_ALIAS}"
+
+
 
       - name: Wipe signing key from disk
         if: always()
