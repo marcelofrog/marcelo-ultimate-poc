@@ -250,7 +250,9 @@ jobs:
             "failed":  ${failed},
             "skipped": ${skipped},
             "run_id":  "${{ github.run_id }}",
-            "commit":  "${{ github.sha }}"
+            "commit":  "${{ github.sha }}",
+            "stage_name": "QA",
+            "gate_name": "3"
           }
           JSON
           echo "passed=${passed}"  >> "$GITHUB_OUTPUT"
