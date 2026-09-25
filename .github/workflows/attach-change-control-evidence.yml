@@ -19,6 +19,7 @@ permissions:
 jobs:
   attach-evidence:
     runs-on: ubuntu-latest
+    environment: qa 
     env:
       APP_NAME: ${{ vars.POC_APP_NAME }}
       JF_URL: ${{ vars.JF_URL }}
