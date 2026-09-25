@@ -17,12 +17,10 @@
 #      All evidence is signed with the key provisioned by
 #      setup/03a-setup-signing-key.sh.
 # -----------------------------------------------------------------------------
-name: build
+name: build golden image
 
 on:
-  push:
-    branches: [main]
-    paths-ignore: [ 'docs/**', 'README.md' ]
+
   workflow_dispatch:
 
 permissions:
