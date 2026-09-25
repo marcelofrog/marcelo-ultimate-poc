@@ -166,6 +166,7 @@ jobs:
       # ---------- 6. Signed evidence: docker image (digest attestation) ------
       - name: Build docker-image predicate
         run: |
+          mkdir -p evidence
           cat > evidence/image.predicate.json <<JSON
           {
             "image":  "${{ steps.tag.outputs.image }}",
