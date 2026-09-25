@@ -1,0 +1,220 @@
+# -----------------------------------------------------------------------------
+# Pull the Docker image that belongs to an AppTrust application version in the
+# stage that matches this job's GitHub Environment, run `curl --version` in
+# that image, and attach signed evidence with the parsed curl version.
+#
+# Required input: application version. The GitHub Environment is how the
+# stage is selected — OIDC maps to the matching JFrog identity, and the
+# image is pulled from `<app>-docker-<env>-local`.
+# -----------------------------------------------------------------------------
+name: attest-curl-version
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: 'Application version to inspect (e.g. 1.0.42-1234567)'
+        required: true
+        type: string
+      github_environment:
+        description: 'GitHub Environment / AppTrust stage to pull the image from'
+        required: false
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+        default: qa
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  attest-curl:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.github_environment }}
+    env:
+      APP_NAME:            ${{ vars.POC_APP_NAME }}
+      PROJECT_KEY:         ${{ vars.POC_PROJECT_KEY }}
+      JF_URL:              ${{ vars.JF_URL }}
+      JF_DOCKER_REGISTRY:  ${{ vars.JF_DOCKER_REGISTRY }}
+      JF_OIDC_PROVIDER:    ${{ vars.JF_OIDC_PROVIDER }}
+      EVD_KEY_ALIAS:       ${{ vars.POC_EVD_KEY_ALIAS }}
+      APP_VERSION:         ${{ inputs.app_version }}
+      JOB_ENVIRONMENT:     ${{ inputs.github_environment }}
+      JFROG_CLI_LOG_LEVEL: ERROR
+
+    steps:
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        with:
+          version: latest
+          oidc-provider-name: ${{ env.JF_OIDC_PROVIDER }}
+          oidc-audience: jfrog-${{ env.APP_NAME }}
+          disable-auto-evidence-collection: true
+        env:
+          JF_URL: ${{ env.JF_URL }}
+
+      - name: Materialise signing key
+        env:
+          POC_EVD_SIGNING_KEY: ${{ secrets.POC_EVD_SIGNING_KEY }}
+        run: |
+          [ -n "${POC_EVD_SIGNING_KEY}" ] || { echo "::error::POC_EVD_SIGNING_KEY missing"; exit 1; }
+          [ -n "${EVD_KEY_ALIAS}" ] || { echo "::error::POC_EVD_KEY_ALIAS missing"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/evd"
+          printf '%s' "${POC_EVD_SIGNING_KEY}" > "$RUNNER_TEMP/evd/signing.key"
+          chmod 600 "$RUNNER_TEMP/evd/signing.key"
+          echo "EVD_KEY_PATH=$RUNNER_TEMP/evd/signing.key" >> "$GITHUB_ENV"
+
+      - name: Resolve stage-local Docker image
+        id: image
+        run: |
+          set -euo pipefail
+
+          [ -n "${APP_NAME}" ]           || { echo "::error::POC_APP_NAME missing"; exit 1; }
+          [ -n "${PROJECT_KEY}" ]        || { echo "::error::POC_PROJECT_KEY missing"; exit 1; }
+          [ -n "${JF_DOCKER_REGISTRY}" ] || { echo "::error::JF_DOCKER_REGISTRY missing"; exit 1; }
+          [ -n "${APP_VERSION}" ]        || { echo "::error::app_version input missing"; exit 1; }
+
+          STAGE_REPO="${APP_NAME}-docker-${JOB_ENVIRONMENT}-local"
+          ENV_UPPER="$(printf '%s' "${JOB_ENVIRONMENT}" | tr '[:lower:]' '[:upper:]')"
+          EXPECTED_STAGE="${PROJECT_KEY}-${ENV_UPPER}"
+
+          content="$RUNNER_TEMP/version-content.json"
+          jf api "/apptrust/api/v1/applications/${APP_NAME}/versions/${APP_VERSION}/content?include=releasables_expanded&package_types=docker" \
+            > "$content"
+
+          current_stage="$(jq -r '.current_stage // empty' "$content")"
+          current_upper="$(printf '%s' "${current_stage}" | tr '[:lower:]' '[:upper:]')"
+          if [ -z "${current_stage}" ] || { [ "${current_upper}" != "${EXPECTED_STAGE}" ] && [ "${current_upper}" != "${ENV_UPPER}" ]; }; then
+            echo "::error::Application version ${APP_VERSION} is at stage '${current_stage:-<none>}', expected ${EXPECTED_STAGE} (GitHub Environment '${JOB_ENVIRONMENT}')."
+            exit 1
+          fi
+
+          pkg="$(jq -c --arg app "${APP_NAME}" '
+            (.releasables // [])
+            | map(select((.package_type // "" | ascii_downcase) == "docker"))
+            | if length == 0 then error("no docker releasable in application version") else . end
+            | (map(select(.name == $app)) | .[0])
+              // (map(select(.name | startswith("library/") | not)) | .[0])
+              // .[0]
+          ' "$content")"
+
+          pkg_name="$(jq -r '.name' <<<"${pkg}")"
+          pkg_version="$(jq -r '.version' <<<"${pkg}")"
+          pkg_sha="$(jq -r '.sha256 // empty' <<<"${pkg}")"
+
+          [ -n "${pkg_name}" ] && [ "${pkg_name}" != "null" ] || { echo "::error::Docker package name missing from version content"; exit 1; }
+          [ -n "${pkg_version}" ] && [ "${pkg_version}" != "null" ] || { echo "::error::Docker package version missing from version content"; exit 1; }
+
+          image="${JF_DOCKER_REGISTRY}/${STAGE_REPO}/${pkg_name}:${pkg_version}"
+          if [ -n "${pkg_sha}" ]; then
+            image_digest="${JF_DOCKER_REGISTRY}/${STAGE_REPO}/${pkg_name}@sha256:${pkg_sha}"
+          else
+            image_digest="${image}"
+          fi
+
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "image_digest=${image_digest}" >> "$GITHUB_OUTPUT"
+          echo "repository=${STAGE_REPO}" >> "$GITHUB_OUTPUT"
+          echo "package_name=${pkg_name}" >> "$GITHUB_OUTPUT"
+          echo "package_version=${pkg_version}" >> "$GITHUB_OUTPUT"
+          echo "digest=${pkg_sha}" >> "$GITHUB_OUTPUT"
+          echo "current_stage=${current_stage}" >> "$GITHUB_OUTPUT"
+          echo "Resolved ${image} (stage ${current_stage}, repo ${STAGE_REPO})"
+
+      - name: Docker login to JFrog
+        run: jf docker login "${JF_DOCKER_REGISTRY}"
+
+      - name: Pull image and read curl version
+        id: curl
+        run: |
+          set -euo pipefail
+
+          image="${{ steps.image.outputs.image_digest }}"
+          jf docker pull "${image}"
+
+          # No `-t`: GitHub-hosted runners do not allocate a TTY.
+          curl_out="$(docker run --rm "${image}" curl --version)"
+          first_line="$(printf '%s\n' "${curl_out}" | head -n1)"
+          curl_version="$(printf '%s\n' "${first_line}" | awk '{print $2}')"
+
+          if [ -z "${curl_version}" ] || ! printf '%s' "${curl_version}" | grep -Eq '^[0-9]+(\.[0-9]+)*([a-zA-Z0-9._+-]*)?$'; then
+            echo "::error::Failed to parse curl version from: ${first_line}"
+            exit 1
+          fi
+
+          {
+            echo "curl_version=${curl_version}"
+            echo "first_line<<EOF"
+            echo "${first_line}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "curl ${curl_version}"
+
+      - name: Build curl-version predicate
+        run: |
+          jq -n \
+            --arg curl_version "${{ steps.curl.outputs.curl_version }}" \
+            --arg first_line "${{ steps.curl.outputs.first_line }}" \
+            --arg image "${{ steps.image.outputs.image }}" \
+            --arg digest "${{ steps.image.outputs.digest }}" \
+            --arg repository "${{ steps.image.outputs.repository }}" \
+            --arg package_name "${{ steps.image.outputs.package_name }}" \
+            --arg package_version "${{ steps.image.outputs.package_version }}" \
+            --arg stage "${{ steps.image.outputs.current_stage }}" \
+            --arg github_environment "${JOB_ENVIRONMENT}" \
+            --arg application "${APP_NAME}" \
+            --arg application_version "${APP_VERSION}" \
+            --arg actor "${{ github.actor }}" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg inspected_at "$(date -u +%FT%TZ)" \
+            '{
+              curl_version: $curl_version,
+              curl_output_first_line: $first_line,
+              image: $image,
+              digest: $digest,
+              repository: $repository,
+              package_name: $package_name,
+              package_version: $package_version,
+              stage: $stage,
+              github_environment: $github_environment,
+              application: $application,
+              application_version: $application_version,
+              actor: $actor,
+              run_id: $run_id,
+              inspected_at: $inspected_at
+            }' > "$RUNNER_TEMP/curl-version.predicate.json"
+
+      - name: Sign and attach curl-version evidence
+        run: |
+          jf evd create \
+            --predicate "$RUNNER_TEMP/curl-version.predicate.json" \
+            --predicate-type "https://jfrog.com/evidence/curl-version/v1" \
+            --application-key "${APP_NAME}" \
+            --application-version "${APP_VERSION}" \
+            --key "${EVD_KEY_PATH}" \
+            --key-alias "${EVD_KEY_ALIAS}"
+
+      - name: Write summary
+        if: always()
+        run: |
+          {
+            echo "### curl version evidence"
+            echo ""
+            echo "| field | value |"
+            echo "|-------|-------|"
+            echo "| application | ${APP_NAME} |"
+            echo "| version | ${APP_VERSION} |"
+            echo "| github environment | ${JOB_ENVIRONMENT} |"
+            echo "| stage | ${{ steps.image.outputs.current_stage }} |"
+            echo "| image | ${{ steps.image.outputs.image }} |"
+            echo "| curl version | ${{ steps.curl.outputs.curl_version }} |"
+            echo "| predicate type | https://jfrog.com/evidence/curl-version/v1 |"
+            echo "| submitted by | ${{ github.actor }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wipe signing key from disk
+        if: always()
+        run: rm -f "${EVD_KEY_PATH}" || true
