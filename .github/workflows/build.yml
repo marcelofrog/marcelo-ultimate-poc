@@ -289,7 +289,12 @@ jobs:
           jf rt build-collect-env "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
           jf rt build-add-git     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
           jf rt build-publish     "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
-          
+
+      - name: Scan Build
+        run: |
+          jf rt build-scan "${JFROG_CLI_BUILD_NAME}" "${JFROG_CLI_BUILD_NUMBER}"
+ 
+
       # ---------- 6. Provenance predicate -------------------------------------
       - name: Build provenance predicate
         run: |
