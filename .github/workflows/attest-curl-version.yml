@@ -138,16 +138,26 @@ jobs:
           jf docker pull "${image}"
 
           # No `-t`: GitHub-hosted runners do not allocate a TTY.
-          curl_out="$(docker run --rm "${image}" curl --version)"
+          run_rc=0
+          curl_out="$(docker run --rm "${image}" curl --version 2>&1)" || run_rc=$?
           first_line="$(printf '%s\n' "${curl_out}" | head -n1)"
-          curl_version="$(printf '%s\n' "${first_line}" | awk '{print $2}')"
 
-          if [ -z "${curl_version}" ] || ! printf '%s' "${curl_version}" | grep -Eq '^[0-9]+(\.[0-9]+)*([a-zA-Z0-9._+-]*)?$'; then
-            echo "::error::Failed to parse curl version from: ${first_line}"
-            exit 1
+          if [ "${run_rc}" -ne 0 ]; then
+            echo "::warning::docker run exited with code ${run_rc}; recording curl_version=NONE"
+            echo "----- docker run output -----"
+            printf '%s\n' "${curl_out}"
+            echo "-----------------------------"
+            curl_version="NONE"
+          else
+            curl_version="$(printf '%s\n' "${first_line}" | awk '{print $2}')"
+            if [ -z "${curl_version}" ] || ! printf '%s' "${curl_version}" | grep -Eq '^[0-9]+(\.[0-9]+)*([a-zA-Z0-9._+-]*)?$'; then
+              echo "::error::Failed to parse curl version from: ${first_line}"
+              exit 1
+            fi
           fi
 
           {
+            echo "exit_code=${run_rc}"
             echo "curl_version=${curl_version}"
             echo "first_line<<EOF"
             echo "${first_line}"
@@ -156,10 +166,13 @@ jobs:
           echo "curl ${curl_version}"
 
       - name: Build curl-version predicate
+        env:
+          CURL_FIRST_LINE: ${{ steps.curl.outputs.first_line }}
         run: |
           jq -n \
             --arg curl_version "${{ steps.curl.outputs.curl_version }}" \
-            --arg first_line "${{ steps.curl.outputs.first_line }}" \
+            --arg first_line "${CURL_FIRST_LINE}" \
+            --argjson docker_run_exit_code "${{ steps.curl.outputs.exit_code }}" \
             --arg image "${{ steps.image.outputs.image }}" \
             --arg digest "${{ steps.image.outputs.digest }}" \
             --arg repository "${{ steps.image.outputs.repository }}" \
@@ -175,6 +188,7 @@ jobs:
             '{
               curl_version: $curl_version,
               curl_output_first_line: $first_line,
+              docker_run_exit_code: $docker_run_exit_code,
               image: $image,
               digest: $digest,
               repository: $repository,
