@@ -36,7 +36,6 @@ jobs:
     environment: ${{ inputs.github_environment }}
     env:
       APP_NAME:            ${{ vars.POC_APP_NAME }}
-      PROJECT_KEY:         ${{ vars.POC_PROJECT_KEY }}
       JF_URL:              ${{ vars.JF_URL }}
       JF_DOCKER_REGISTRY:  ${{ vars.JF_DOCKER_REGISTRY }}
       JF_OIDC_PROVIDER:    ${{ vars.JF_OIDC_PROVIDER }}
@@ -73,58 +72,23 @@ jobs:
           set -euo pipefail
 
           [ -n "${APP_NAME}" ]           || { echo "::error::POC_APP_NAME missing"; exit 1; }
-          [ -n "${PROJECT_KEY}" ]        || { echo "::error::POC_PROJECT_KEY missing"; exit 1; }
           [ -n "${JF_DOCKER_REGISTRY}" ] || { echo "::error::JF_DOCKER_REGISTRY missing"; exit 1; }
           [ -n "${APP_VERSION}" ]        || { echo "::error::app_version input missing"; exit 1; }
 
-          STAGE_REPO="${APP_NAME}-docker-${JOB_ENVIRONMENT}-local"
-          ENV_UPPER="$(printf '%s' "${JOB_ENVIRONMENT}" | tr '[:lower:]' '[:upper:]')"
-          # AppTrust stages are project-prefixed: {project_key}-QA, not QA.
-          EXPECTED_STAGE="${PROJECT_KEY}-${ENV_UPPER}"
-
-          content="$RUNNER_TEMP/version-content.json"
-          jf api "/apptrust/api/v1/applications/${APP_NAME}/versions/${APP_VERSION}/content?include=releasables_expanded&package_types=docker" \
-            > "$content"
-
-          current_stage="$(jq -r '.current_stage // empty' "$content" | tr -d '[:space:]')"
-          current_upper="$(printf '%s' "${current_stage}" | tr '[:lower:]' '[:upper:]')"
-          expected_upper="$(printf '%s' "${EXPECTED_STAGE}" | tr '[:lower:]' '[:upper:]')"
-          if [ -z "${current_stage}" ]; then
-            echo "::error::Application version ${APP_VERSION} has no current stage; expected ${EXPECTED_STAGE} (GitHub Environment '${JOB_ENVIRONMENT}')."
-            exit 1
-          fi
-          if [ "${current_upper}" != "${expected_upper}" ] && [ "${current_upper}" != "${ENV_UPPER}" ]; then
-            echo "::error::Application version ${APP_VERSION} is at stage '${current_stage}', expected ${EXPECTED_STAGE} (GitHub Environment '${JOB_ENVIRONMENT}')."
-            exit 1
-          fi
-
-          pkg="$(jq -c --arg app "${APP_NAME}" '
-            (.releasables // [])
-            | map(select((.package_type // "" | ascii_downcase) == "docker"))
-            | if length == 0 then error("no docker releasable in application version") else . end
-            | (map(select(.name == $app)) | .[0])
-              // (map(select(.name | startswith("library/") | not)) | .[0])
-              // .[0]
-          ' "$content")"
-
-          pkg_name="$(jq -r '.name' <<<"${pkg}")"
-          pkg_sha="$(jq -r '.sha256 // empty' <<<"${pkg}")"
-          # build.yml tags the image with github.run_id and sets
+          # build.yml tags ${APP_NAME}:{github.run_id} and sets
           # app_version=1.0.{run_number}-{run_id} (e.g. 1.0.75-36045841942).
           original_run_id="${APP_VERSION##*-}"
+          [ -n "${original_run_id}" ] && [ "${original_run_id}" != "${APP_VERSION}" ] \
+            || { echo "::error::Could not parse original run_id from app_version '${APP_VERSION}'"; exit 1; }
 
-          [ -n "${pkg_name}" ] && [ "${pkg_name}" != "null" ] || { echo "::error::Docker package name missing from version content"; exit 1; }
-          [ -n "${original_run_id}" ] && [ "${original_run_id}" != "${APP_VERSION}" ] || { echo "::error::Could not parse original run_id from app_version '${APP_VERSION}'"; exit 1; }
-
-          image="${JF_DOCKER_REGISTRY}/${STAGE_REPO}/${pkg_name}:${original_run_id}"
+          STAGE_REPO="${APP_NAME}-docker-${JOB_ENVIRONMENT}-local"
+          image="${JF_DOCKER_REGISTRY}/${STAGE_REPO}/${APP_NAME}:${original_run_id}"
 
           echo "image=${image}" >> "$GITHUB_OUTPUT"
           echo "repository=${STAGE_REPO}" >> "$GITHUB_OUTPUT"
-          echo "package_name=${pkg_name}" >> "$GITHUB_OUTPUT"
+          echo "package_name=${APP_NAME}" >> "$GITHUB_OUTPUT"
           echo "package_version=${original_run_id}" >> "$GITHUB_OUTPUT"
-          echo "digest=${pkg_sha}" >> "$GITHUB_OUTPUT"
-          echo "current_stage=${current_stage}" >> "$GITHUB_OUTPUT"
-          echo "Resolved ${image} (stage ${current_stage}, repo ${STAGE_REPO})"
+          echo "Resolved ${image}"
 
       - name: Docker login to JFrog
         run: jf docker login "${JF_DOCKER_REGISTRY}"
@@ -174,11 +138,9 @@ jobs:
             --arg first_line "${CURL_FIRST_LINE}" \
             --argjson docker_run_exit_code "${{ steps.curl.outputs.exit_code }}" \
             --arg image "${{ steps.image.outputs.image }}" \
-            --arg digest "${{ steps.image.outputs.digest }}" \
             --arg repository "${{ steps.image.outputs.repository }}" \
             --arg package_name "${{ steps.image.outputs.package_name }}" \
             --arg package_version "${{ steps.image.outputs.package_version }}" \
-            --arg stage "${{ steps.image.outputs.current_stage }}" \
             --arg github_environment "${JOB_ENVIRONMENT}" \
             --arg application "${APP_NAME}" \
             --arg application_version "${APP_VERSION}" \
@@ -190,11 +152,9 @@ jobs:
               curl_output_first_line: $first_line,
               docker_run_exit_code: $docker_run_exit_code,
               image: $image,
-              digest: $digest,
               repository: $repository,
               package_name: $package_name,
               package_version: $package_version,
-              stage: $stage,
               github_environment: $github_environment,
               application: $application,
               application_version: $application_version,
@@ -224,7 +184,6 @@ jobs:
             echo "| application | ${APP_NAME} |"
             echo "| version | ${APP_VERSION} |"
             echo "| github environment | ${JOB_ENVIRONMENT} |"
-            echo "| stage | ${{ steps.image.outputs.current_stage }} |"
             echo "| image | ${{ steps.image.outputs.image }} |"
             echo "| curl version | ${{ steps.curl.outputs.curl_version }} |"
             echo "| predicate type | https://jfrog.com/evidence/curl-version/v1 |"
