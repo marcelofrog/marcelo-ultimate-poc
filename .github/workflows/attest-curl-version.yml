@@ -108,24 +108,20 @@ jobs:
           ' "$content")"
 
           pkg_name="$(jq -r '.name' <<<"${pkg}")"
-          pkg_version="$(jq -r '.version' <<<"${pkg}")"
           pkg_sha="$(jq -r '.sha256 // empty' <<<"${pkg}")"
+          # build.yml tags the image with github.run_id and sets
+          # app_version=1.0.{run_number}-{run_id} (e.g. 1.0.75-36045841942).
+          original_run_id="${APP_VERSION##*-}"
 
           [ -n "${pkg_name}" ] && [ "${pkg_name}" != "null" ] || { echo "::error::Docker package name missing from version content"; exit 1; }
-          [ -n "${pkg_version}" ] && [ "${pkg_version}" != "null" ] || { echo "::error::Docker package version missing from version content"; exit 1; }
+          [ -n "${original_run_id}" ] && [ "${original_run_id}" != "${APP_VERSION}" ] || { echo "::error::Could not parse original run_id from app_version '${APP_VERSION}'"; exit 1; }
 
-          image="${JF_DOCKER_REGISTRY}/${STAGE_REPO}/${pkg_name}:${pkg_version}"
-          if [ -n "${pkg_sha}" ]; then
-            image_digest="${JF_DOCKER_REGISTRY}/${STAGE_REPO}/${pkg_name}@sha256:${pkg_sha}"
-          else
-            image_digest="${image}"
-          fi
+          image="${JF_DOCKER_REGISTRY}/${STAGE_REPO}/${pkg_name}:${original_run_id}"
 
           echo "image=${image}" >> "$GITHUB_OUTPUT"
-          echo "image_digest=${image_digest}" >> "$GITHUB_OUTPUT"
           echo "repository=${STAGE_REPO}" >> "$GITHUB_OUTPUT"
           echo "package_name=${pkg_name}" >> "$GITHUB_OUTPUT"
-          echo "package_version=${pkg_version}" >> "$GITHUB_OUTPUT"
+          echo "package_version=${original_run_id}" >> "$GITHUB_OUTPUT"
           echo "digest=${pkg_sha}" >> "$GITHUB_OUTPUT"
           echo "current_stage=${current_stage}" >> "$GITHUB_OUTPUT"
           echo "Resolved ${image} (stage ${current_stage}, repo ${STAGE_REPO})"
@@ -138,7 +134,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          image="${{ steps.image.outputs.image_digest }}"
+          image="${{ steps.image.outputs.image }}"
           jf docker pull "${image}"
 
           # No `-t`: GitHub-hosted runners do not allocate a TTY.
