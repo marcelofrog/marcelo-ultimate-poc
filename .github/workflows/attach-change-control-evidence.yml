@@ -1,0 +1,87 @@
+# -----------------------------------------------------------------------------
+# Attach signed change-control evidence to an existing AppTrust application
+# version. The approver list is hardcoded; only the version is prompted.
+# -----------------------------------------------------------------------------
+name: attach-change-control-evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: 'Application version to attest (e.g. 1.0.42-1234567)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  attach-evidence:
+    runs-on: ubuntu-latest
+    env:
+      APP_NAME: ${{ vars.POC_APP_NAME }}
+      JF_URL: ${{ vars.JF_URL }}
+      JF_OIDC_PROVIDER: ${{ vars.JF_OIDC_PROVIDER }}
+      EVD_KEY_ALIAS: ${{ vars.POC_EVD_KEY_ALIAS }}
+
+    steps:
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        with:
+          version: latest
+          oidc-provider-name: ${{ env.JF_OIDC_PROVIDER }}
+          oidc-audience: jfrog-${{ env.APP_NAME }}
+          disable-auto-evidence-collection: true
+        env:
+          JF_URL: ${{ env.JF_URL }}
+
+      - name: Materialise signing key
+        env:
+          POC_EVD_SIGNING_KEY: ${{ secrets.POC_EVD_SIGNING_KEY }}
+        run: |
+          [ -n "${POC_EVD_SIGNING_KEY}" ] || { echo "::error::POC_EVD_SIGNING_KEY missing"; exit 1; }
+          [ -n "${EVD_KEY_ALIAS}" ] || { echo "::error::POC_EVD_KEY_ALIAS missing"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/evd"
+          printf '%s' "${POC_EVD_SIGNING_KEY}" > "$RUNNER_TEMP/evd/signing.key"
+          chmod 600 "$RUNNER_TEMP/evd/signing.key"
+          echo "EVD_KEY_PATH=$RUNNER_TEMP/evd/signing.key" >> "$GITHUB_ENV"
+
+      - name: Build change-control predicate
+        run: |
+          cat > "$RUNNER_TEMP/change-control.predicate.json" <<JSON
+          {
+            "approver_list": [
+              {"name": "Jane Doe", "Role": "Release Manager"},
+              {"name": "John Doe", "Role": "Security Engineer"}
+            ]
+          }
+          JSON
+
+      - name: Sign and attach change-control evidence
+        run: |
+          jf evd create \
+            --predicate "$RUNNER_TEMP/change-control.predicate.json" \
+            --predicate-type "https://jfrog.com/evidence/change-control/v1" \
+            --application-key "${APP_NAME}" \
+            --application-version "${{ inputs.app_version }}" \
+            --key "${EVD_KEY_PATH}" \
+            --key-alias "${EVD_KEY_ALIAS}"
+
+      - name: Write summary
+        if: always()
+        run: |
+          {
+            echo "### Change-control evidence"
+            echo ""
+            echo "| field | value |"
+            echo "|-------|-------|"
+            echo "| application | ${APP_NAME} |"
+            echo "| version | ${{ inputs.app_version }} |"
+            echo "| predicate type | https://jfrog.com/evidence/change-control/v1 |"
+            echo "| submitted by | ${{ github.actor }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wipe signing key from disk
+        if: always()
+        run: rm -f "${EVD_KEY_PATH}" || true

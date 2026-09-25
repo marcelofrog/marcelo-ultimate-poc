@@ -269,16 +269,6 @@ jobs:
             -H "X-JFrog-Signing-Key-Name: ${LIFECYCLE_KEY_NAME}" \
             --input "$RUNNER_TEMP/version-create.json"
 
-      - name: Sign & attach test-results evidence
-        run: |
-          jf evd create \
-            --predicate           evidence/test-results.predicate.json \
-            --predicate-type      "https://jfrog.com/evidence/test-results/v1" \
-            --application-key     "${APP_NAME}" \
-            --application-version "${{ steps.tag.outputs.app_version }}" \
-            --key                 "${EVD_KEY_PATH}" \
-            --key-alias           "${EVD_KEY_ALIAS}"
-
 
 
       - name: Wipe signing key from disk
@@ -297,8 +287,6 @@ jobs:
             echo "| version         | ${{ steps.tag.outputs.app_version }} |"
             echo "| image           | ${{ steps.tag.outputs.image }} |"
             echo "| image digest    | ${{ steps.push.outputs.digest }} |"
-            echo "| tests passed    | ${{ steps.predicate.outputs.passed }} |"
-            echo "| tests failed    | ${{ steps.predicate.outputs.failed }} |"
-            echo "| signed evidence | test-results, docker-image, provenance |"
+            echo "| signed evidence | docker-image, provenance |"
             echo "| key alias       | ${EVD_KEY_ALIAS} |"
           } >> "$GITHUB_STEP_SUMMARY"
