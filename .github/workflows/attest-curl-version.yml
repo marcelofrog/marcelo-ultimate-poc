@@ -79,16 +79,22 @@ jobs:
 
           STAGE_REPO="${APP_NAME}-docker-${JOB_ENVIRONMENT}-local"
           ENV_UPPER="$(printf '%s' "${JOB_ENVIRONMENT}" | tr '[:lower:]' '[:upper:]')"
+          # AppTrust stages are project-prefixed: {project_key}-QA, not QA.
           EXPECTED_STAGE="${PROJECT_KEY}-${ENV_UPPER}"
 
           content="$RUNNER_TEMP/version-content.json"
           jf api "/apptrust/api/v1/applications/${APP_NAME}/versions/${APP_VERSION}/content?include=releasables_expanded&package_types=docker" \
             > "$content"
 
-          current_stage="$(jq -r '.current_stage // empty' "$content")"
+          current_stage="$(jq -r '.current_stage // empty' "$content" | tr -d '[:space:]')"
           current_upper="$(printf '%s' "${current_stage}" | tr '[:lower:]' '[:upper:]')"
-          if [ -z "${current_stage}" ] || { [ "${current_upper}" != "${EXPECTED_STAGE}" ] && [ "${current_upper}" != "${ENV_UPPER}" ]; }; then
-            echo "::error::Application version ${APP_VERSION} is at stage '${current_stage:-<none>}', expected ${EXPECTED_STAGE} (GitHub Environment '${JOB_ENVIRONMENT}')."
+          expected_upper="$(printf '%s' "${EXPECTED_STAGE}" | tr '[:lower:]' '[:upper:]')"
+          if [ -z "${current_stage}" ]; then
+            echo "::error::Application version ${APP_VERSION} has no current stage; expected ${EXPECTED_STAGE} (GitHub Environment '${JOB_ENVIRONMENT}')."
+            exit 1
+          fi
+          if [ "${current_upper}" != "${expected_upper}" ] && [ "${current_upper}" != "${ENV_UPPER}" ]; then
+            echo "::error::Application version ${APP_VERSION} is at stage '${current_stage}', expected ${EXPECTED_STAGE} (GitHub Environment '${JOB_ENVIRONMENT}')."
             exit 1
           fi
 
