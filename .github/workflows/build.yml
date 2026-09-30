@@ -42,7 +42,7 @@ jobs:
       PYPI_REMOTE:         ${{ vars.POC_APP_NAME }}-pypi-remote
       DOCKER_REMOTE:       ${{ vars.POC_APP_NAME }}-docker-remote
       BASE_DOCKER_IMAGE:          "python:3.14"
-      PYTHON_VERSION:             "3.14.0"
+      PYTHON_VERSION:             "3.14"
       # Keep jf stdout as JSON/payload only. Info/Warn timestamps on stdout
       # make `jq` fail ("Invalid numeric literal") on curation-audit --format=json.
       JFROG_CLI_LOG_LEVEL: ERROR
@@ -220,7 +220,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${PYTHON_VERSION}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install test deps from curated PyPI
         working-directory: app
