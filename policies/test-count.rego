@@ -1,72 +1,63 @@
-# -----------------------------------------------------------------------------
-# test-count.rego
-#
-# AppTrust promotion gate policy. Blocks promotion of an application version
-# unless a "test-results" evidence predicate is attached to the version and
-# reports at least `data.parameters.min_passing_tests` successful tests.
-#
-# Input shape passed by the AppTrust gate engine:
-#   input.application.key       string
-#   input.application.version   string
-#   input.evidence              []{ predicateType, predicate, ... }
-#   input.parameters            { min_passing_tests: int }
-#
-# The build workflow publishes evidence like:
-#   {
-#     "predicateType": "https://jfrog.com/evidence/test-results/v1",
-#     "predicate": {
-#       "framework": "pytest",
-#       "passed": 12,
-#       "failed": 0,
-#       "skipped": 0
-#     }
-#   }
-# -----------------------------------------------------------------------------
-package apptrust.gates.testcount
+package curation.policies
 
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
-default allow := false
+app_version := input.data.applications.getApplicationVersion
 
-min_required := input.parameters.min_passing_tests
+application_evidence := [predicate |
+	predicate := app_version.application.evidenceSubject.evidenceConnection.edges[_].node
+]
 
-test_evidence[e] {
-    some i
-    e := input.evidence[i]
-    e.predicateType == "https://jfrog.com/evidence/test-results/v1"
+version_evidence := [predicate | predicate := app_version.evidenceSubject.evidenceConnection.edges[_].node]
+
+all_layers_evidences := array.concat(application_evidence, version_evidence)
+
+required_predicate_type := input.params.predicateType
+
+required_count := to_number(input.params.approver_count_required)
+
+change_control_evidence := [e |
+	some e in all_layers_evidences
+	e.predicateType == required_predicate_type
+]
+
+approver_list_from(pred) := pred.approver_list if {
+	is_object(pred)
 }
 
-passing_total := n {
-    n := sum([e.predicate.passed | e := test_evidence[_]])
+approver_list_from(pred) := json.unmarshal(pred).approver_list if {
+	is_string(pred)
 }
 
-allow if {
-    count(test_evidence) > 0
-    passing_total >= min_required
-    all_zero_failures
+approver_counts := [n |
+	some e in change_control_evidence
+	list := approver_list_from(e.predicate)
+	n := count(list)
+]
+
+best_count := max(array.concat(approver_counts, [0]))
+
+default meets_required := false
+
+meets_required if {
+	count(change_control_evidence) > 0
+	best_count >= required_count
 }
 
-all_zero_failures if {
-    every e in test_evidence {
-        e.predicate.failed == 0
-    }
+message := sprintf("no application evidence with predicateType %s", [required_predicate_type]) if {
+	count(change_control_evidence) == 0
 }
 
-# The gate engine reads `deny` as an array of human-readable strings.
-deny[msg] {
-    count(test_evidence) == 0
-    msg := "no test-results evidence attached to this application version"
+message := sprintf("found %d approver(s), need at least %d", [best_count, required_count]) if {
+	count(change_control_evidence) > 0
+	not meets_required
 }
 
-deny[msg] {
-    count(test_evidence) > 0
-    passing_total < min_required
-    msg := sprintf("only %d passing tests, need at least %d", [passing_total, min_required])
+message := sprintf("found %d approver(s), required %d", [best_count, required_count]) if {
+	meets_required
 }
 
-deny[msg] {
-    some e in test_evidence
-    e.predicate.failed > 0
-    msg := sprintf("evidence reports %d failing tests", [e.predicate.failed])
+allow := {
+	"should_allow": meets_required,
+	"message": message,
 }

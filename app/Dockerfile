@@ -18,7 +18,7 @@ ARG JF_DOCKER_REMOTE
 
 # Base image pulled *through* the curated Docker remote — never from Docker Hub
 # directly. Curation policies are enforced on the pull.
-FROM ${JF_DOCKER_REGISTRY}/${JF_DOCKER_REMOTE}/library/python:3.12-slim AS runtime
+FROM ${JF_DOCKER_REGISTRY}/${JF_DOCKER_REMOTE}/library/python:3.14 AS runtime
 
 ARG JF_PYPI_INDEX_URL
 
