@@ -220,7 +220,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '${PYTHON_VERSION}'
+          python-version: ${PYTHON_VERSION}
 
       - name: Install test deps from curated PyPI
         working-directory: app
