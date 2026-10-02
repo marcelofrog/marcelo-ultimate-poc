@@ -41,8 +41,8 @@ jobs:
       DEV_REPO:            ${{ vars.POC_APP_NAME }}-docker-dev-local
       PYPI_REMOTE:         ${{ vars.POC_APP_NAME }}-pypi-remote
       DOCKER_REMOTE:       ${{ vars.POC_APP_NAME }}-docker-remote
-      BASE_DOCKER_IMAGE:          "python:3.13"
-      PYTHON_VERSION:             "3.13"
+      BASE_DOCKER_IMAGE:          "python:3.12-slim"
+      PYTHON_VERSION:             "3.12"
       # Keep jf stdout as JSON/payload only. Info/Warn timestamps on stdout
       # make `jq` fail ("Invalid numeric literal") on curation-audit --format=json.
       JFROG_CLI_LOG_LEVEL: ERROR
